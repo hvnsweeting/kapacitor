@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/influxdata/kapacitor"
+	"github.com/influxdata/kapacitor/services/alert"
 	"github.com/pkg/errors"
 )
 
@@ -70,11 +70,11 @@ type attachment struct {
 }
 
 type testOptions struct {
-	Channel   string               `json:"channel"`
-	Message   string               `json:"message"`
-	Level     kapacitor.AlertLevel `json:"level"`
-	Username  string               `json:"username"`
-	IconEmoji string               `json:"icon-emoji"`
+	Channel   string      `json:"channel"`
+	Message   string      `json:"message"`
+	Level     alert.Level `json:"level"`
+	Username  string      `json:"username"`
+	IconEmoji string      `json:"icon-emoji"`
 }
 
 func (s *Service) TestOptions() interface{} {
@@ -82,7 +82,7 @@ func (s *Service) TestOptions() interface{} {
 	return &testOptions{
 		Channel: c.Channel,
 		Message: "test slack message",
-		Level:   kapacitor.CritAlert,
+		Level:   alert.Critical,
 	}
 }
 
@@ -94,7 +94,7 @@ func (s *Service) Test(options interface{}) error {
 	return s.Alert(o.Channel, o.Message, o.Username, o.IconEmoji, o.Level)
 }
 
-func (s *Service) Alert(channel, message, username, iconEmoji string, level kapacitor.AlertLevel) error {
+func (s *Service) Alert(channel, message, username, iconEmoji string, level alert.Level) error {
 	url, post, err := s.preparePost(channel, message, username, iconEmoji, level)
 	if err != nil {
 		return err
@@ -121,7 +121,7 @@ func (s *Service) Alert(channel, message, username, iconEmoji string, level kapa
 	return nil
 }
 
-func (s *Service) preparePost(channel, message, username, iconEmoji string, level kapacitor.AlertLevel) (string, io.Reader, error) {
+func (s *Service) preparePost(channel, message, username, iconEmoji string, level alert.Level) (string, io.Reader, error) {
 	c := s.config()
 
 	if !c.Enabled {
@@ -132,9 +132,9 @@ func (s *Service) preparePost(channel, message, username, iconEmoji string, leve
 	}
 	var color string
 	switch level {
-	case kapacitor.WarnAlert:
+	case alert.Warning:
 		color = "warning"
-	case kapacitor.CritAlert:
+	case alert.Critical:
 		color = "danger"
 	default:
 		color = "good"
