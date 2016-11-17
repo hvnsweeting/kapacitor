@@ -203,6 +203,10 @@ func (s *Service) Handler(c HandlerConfig) alert.Handler {
 	}
 }
 
+func (h handler) Name() string {
+	return "Slack"
+}
+
 func (h handler) Handle(ctxt context.Context, event alert.Event) error {
 	return h.s.Alert(
 		ctxt,
