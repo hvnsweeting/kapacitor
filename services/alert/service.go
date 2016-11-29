@@ -13,16 +13,19 @@ const eventBufferSize = 100
 type Service struct {
 	mu sync.RWMutex
 
+	handlers map[string]HandlerConfig
+
 	topics map[string]*Topic
+
 	logger *log.Logger
 }
 
 func NewService(c Config, l *log.Logger) *Service {
 	s := &Service{
-		topics: make(map[string]*Topic),
-		logger: l,
+		handlers: make(map[string]HandlerConfig),
+		topics:   make(map[string]*Topic),
+		logger:   l,
 	}
-
 	return s
 }
 

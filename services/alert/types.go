@@ -34,6 +34,19 @@ type Handler interface {
 	Handle(event Event)
 }
 
+// HandlerConfig provides all the necessary information to create a handler
+type HandlerConfig struct {
+	ID      string
+	Topics  []string
+	Actions []HandlerAction
+}
+
+// HandlerAction defines an action an handler can take.
+type HandlerAction struct {
+	Kind    string
+	Options map[string]interface{}
+}
+
 type EventState struct {
 	ID       string
 	Message  string

@@ -1353,7 +1353,7 @@ Alerts are grouped into topics.
 An alert handler "listens" on a topic for any new events.
 You can either specify the alert topic in the TICKscript or one will be generated for you.
 
-To query the list of available topics make a GET requests to `/kapacitor/v1/alerts/topics/`.
+To query the list of available topics make a GET requests to `/kapacitor/v1/alerts/topics`.
 
 #### Example
 
@@ -1366,21 +1366,17 @@ GET /kapacitor/v1/alerts/topics
     "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics"},
     "topics: [
         {
-            "links": [
-                {"rel":"self","href":"/kapacitor/v1/alerts/topics/system"},
-                {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
-                {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
-            ],
-            "id": "system"
+            "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/system"},
+            "eventsLink" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
+            "handlersLink": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
+            "id": "system",
             "level":"CRITICAL"
         },
         {
-            "links": [
-                {"rel":"self","href":"/kapacitor/v1/alerts/topics/app"},
-                {"rel":"events","href":"/kapacitor/v1/alerts/topics/app/events"},
-                {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/app/handlers"},
-            ],
-            "id": "app"
+            "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/app"},
+            "eventsLink" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/app/events"},
+            "handlersLink": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/app/handlers"},
+            "id": "app",
             "level":"OK"
         }
     ]
@@ -1399,13 +1395,11 @@ GET /kapacitor/v1/alerts/topics/system
 
 ```
 {
-    "links": [
-        {"rel":"self","href":"/kapacitor/v1/alerts/topics/system"},
-        {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
-        {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
-    ],
+    "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/system"},
     "id": "system",
     "level":"CRITICAL"
+    "eventsLink" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
+    "handlersLink": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
 }
 ```
 
@@ -1481,6 +1475,9 @@ You can get a list of handlers configured for a topic by making a GET request to
 
 #### Example
 
+
+Get the handlers for the `system` topic.
+
 ```
 GET /kapacitor/v1/alerts/topics/system/handlers
 ```
@@ -1491,12 +1488,39 @@ GET /kapacitor/v1/alerts/topics/system/handlers
     "id": "system",
     "handlers": [
         {
-            "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/slack"},
-            "id":"slack",
+            "type" : "identified",
+            "link":{"rel":"handler","href":"/kapacitor/v1/alerts/handlers/slack"},
+            "id":"slack"
         },
         {
-            "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/smtp"},
-            "id":"smtp",
+            "type" : "identified",
+            "link":{"rel":"handler","href":"/kapacitor/v1/alerts/handlers/smtp"},
+            "id":"smtp"
+        }
+    ]
+}
+```
+
+Get the handlers for the anonymous topic `main:alert_cpu:alert5`.
+This topic represents an auto-generated topic from a task that has defined handlers explicitly in the TICKscript.
+Anonymous handlers cannot be modified via the API.
+
+```
+GET /kapacitor/v1/alerts/topics/main:alert_cpu:alert5/handlers
+```
+
+```
+{
+    "link":{"rel":"self","href":"/kapacitor/v1/topics/system/handlers"},
+    "id": "system",
+    "handlers": [
+        {
+            "type" : "anonymous",
+            "kind" : "slack"
+        },
+        {
+            "type" : "anonymous",
+            "kind" : "smtp"
         }
     ]
 }
@@ -1519,10 +1543,18 @@ GET /kapacitor/v1/alerts/handlers
         {
             "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/slack"},
             "id":"slack",
+            "topics": ["system", "app"],
+            "actions": [
+                {"slack": {"channel":"#alerts"}}
+            ]
         },
         {
             "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/smtp"},
             "id":"smtp",
+            "topics": ["system", "app"],
+            "actions": [
+                {"smtp": {}}
+            ]
         }
     ]
 }
@@ -1540,7 +1572,11 @@ GET /kapacitor/v1/alerts/handlers/<handler id>
 ```
 {
     "link":{"rel":"self","href":"/kapacitor/v1/handlers/slack"},
-    "id":"slack"
+    "id":"slack",
+    "topics": ["system", "app"],
+    "actions": [
+        {"slack": {"channel":"#alerts"}}
+    ]
 }
 ```
 
@@ -1554,7 +1590,7 @@ POST /kapacitor/v1/alerts/handlers
     "id":"slack",
     "topics": ["system", "app"],
     "actions": [
-        { "slack": {"channel":"#alerts"}} }
+        {"slack": {"channel":"#alerts"}}
     ]
 
 }
