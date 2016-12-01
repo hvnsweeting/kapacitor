@@ -81,13 +81,10 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 		a:    n,
 	}
 	an.node.runF = an.runAlert
-	an.node.stopF = an.stopAlert
 
 	an.topic = n.Topic
 	// Create anonymous topic name
 	an.anonTopic = fmt.Sprintf("%s:%s:%s", et.tm.ID(), et.Task.ID, an.Name())
-	l.Println("D! anonTopic", an.anonTopic)
-	l.Println("D! topic", an.topic)
 
 	// Create buffer pool for the templates
 	an.bufPool = sync.Pool{
@@ -378,11 +375,6 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 	return
 }
 
-func (a *AlertNode) stopAlert() {
-	// Delete the anonymous topic, which will also deregister its handlers
-	a.et.tm.AlertService.DeleteTopic(a.anonTopic)
-}
-
 func (a *AlertNode) runAlert([]byte) error {
 	a.alertsTriggered = &expvar.Int{}
 	a.statMap.Set(statsAlertsTriggered, a.alertsTriggered)
@@ -406,9 +398,29 @@ func (a *AlertNode) runAlert([]byte) error {
 	case pipeline.StreamEdge:
 		for p, ok := a.ins[0].NextPoint(); ok; p, ok = a.ins[0].NextPoint() {
 			a.timer.Start()
+			id, err := a.renderID(p.Name, p.Group, p.Tags)
+			if err != nil {
+				return err
+			}
 			var currentLevel alert.Level
 			if state, ok := a.states[p.Group]; ok {
 				currentLevel = state.currentLevel()
+			} else {
+				// Check for pre-existing level on topics
+				if len(a.handlers) > 0 {
+					if state, ok := a.et.tm.AlertService.EventState(a.anonTopic, id); ok {
+						currentLevel = state.Level
+					}
+				}
+				if a.topic != "" {
+					if state, ok := a.et.tm.AlertService.EventState(a.topic, id); ok {
+						currentLevel = state.Level
+					}
+				}
+				if currentLevel != alert.OK {
+					// Update the state with the restored state
+					a.updateState(p.Time, currentLevel, p.Group)
+				}
 			}
 			l := a.determineLevel(p.Time, p.Fields, p.Tags, currentLevel)
 			state := a.updateState(p.Time, l, p.Group)
@@ -432,7 +444,7 @@ func (a *AlertNode) runAlert([]byte) error {
 					continue
 				}
 				duration := state.duration()
-				event, err := a.event(p.Name, p.Group, p.Tags, p.Fields, l, p.Time, duration, batch)
+				event, err := a.event(id, p.Name, p.Group, p.Tags, p.Fields, l, p.Time, duration, batch)
 				if err != nil {
 					return err
 				}
@@ -475,6 +487,10 @@ func (a *AlertNode) runAlert([]byte) error {
 	case pipeline.BatchEdge:
 		for b, ok := a.ins[0].NextBatch(); ok; b, ok = a.ins[0].NextBatch() {
 			a.timer.Start()
+			id, err := a.renderID(b.Name, b.Group, b.Tags)
+			if err != nil {
+				return err
+			}
 			if len(b.Points) == 0 {
 				a.timer.Stop()
 				continue
@@ -485,11 +501,27 @@ func (a *AlertNode) runAlert([]byte) error {
 			highestLevel := alert.OK
 			var highestPoint *models.BatchPoint
 
-			for i, p := range b.Points {
-				var currentLevel alert.Level
-				if state, ok := a.states[b.Group]; ok {
-					currentLevel = state.currentLevel()
+			var currentLevel alert.Level
+			if state, ok := a.states[b.Group]; ok {
+				currentLevel = state.currentLevel()
+			} else {
+				// Check for pre-existing level on topics
+				if len(a.handlers) > 0 {
+					if state, ok := a.et.tm.AlertService.EventState(a.anonTopic, id); ok {
+						currentLevel = state.Level
+					}
 				}
+				if a.topic != "" {
+					if state, ok := a.et.tm.AlertService.EventState(a.topic, id); ok {
+						currentLevel = state.Level
+					}
+				}
+				if currentLevel != alert.OK {
+					// Update the state with the restored state
+					a.updateState(b.TMax, currentLevel, b.Group)
+				}
+			}
+			for i, p := range b.Points {
 				l := a.determineLevel(p.Time, p.Fields, p.Tags, currentLevel)
 				if l < lowestLevel {
 					lowestLevel = l
@@ -530,7 +562,7 @@ func (a *AlertNode) runAlert([]byte) error {
 				}
 
 				duration := state.duration()
-				event, err := a.event(b.Name, b.Group, b.Tags, highestPoint.Fields, l, t, duration, b)
+				event, err := a.event(id, b.Name, b.Group, b.Tags, highestPoint.Fields, l, t, duration, b)
 				if err != nil {
 					return err
 				}
@@ -675,7 +707,7 @@ func (a *AlertNode) batchToResult(b models.Batch) influxql.Result {
 }
 
 func (a *AlertNode) event(
-	name string,
+	id, name string,
 	group models.GroupID,
 	tags models.Tags,
 	fields models.Fields,
@@ -684,10 +716,6 @@ func (a *AlertNode) event(
 	d time.Duration,
 	b models.Batch,
 ) (alert.Event, error) {
-	id, err := a.renderID(name, group, tags)
-	if err != nil {
-		return alert.Event{}, err
-	}
 	msg, details, err := a.renderMessageAndDetails(id, name, t, group, tags, fields, level)
 	if err != nil {
 		return alert.Event{}, err

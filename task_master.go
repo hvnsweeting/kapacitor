@@ -68,6 +68,7 @@ type TaskMaster struct {
 	UDFService UDFService
 
 	AlertService interface {
+		EventState(topic, event string) (alert.EventState, bool)
 		Collect(event alert.Event) error
 		RegisterHandler(topics []string, h alert.Handler)
 		DeregisterHandler(topics []string, h alert.Handler)

@@ -1740,6 +1740,15 @@ type EventState struct {
 	Level    string
 }
 
+type AlertHandlers struct {
+	Link    Link
+	ID      string
+	Topics  []string
+	Actions []AlertHandlerAction
+}
+
+type AlertHandlerAction map[string]map[string]interface{}
+
 type LogLevelOptions struct {
 	Level string `json:"level"`
 }

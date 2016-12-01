@@ -31,6 +31,11 @@ const (
 	topicEventsPath   = "events"
 	topicHandlersPath = "handlers"
 
+	eventsPattern   = "*/" + topicEventsPath
+	eventPattern    = "*/" + topicEventsPath + "/*"
+	handlersPattern = "*/" + topicHandlersPath
+	handlerPattern  = "*/" + topicHandlersPath + "/*"
+
 	eventsRelation   = "events"
 	handlersRelation = "handlers"
 )
@@ -127,11 +132,6 @@ func (s *Service) handleListTopics(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(httpd.MarshalJSON(topics, true))
 }
-
-const eventsPattern = "*/events"
-const eventPattern = "*/events/*"
-const handlersPattern = "*/handlers"
-const handlerPattern = "*/handlers/*"
 
 func (s *Service) topicIDFromPath(p string) (id string) {
 	d := p
@@ -258,6 +258,16 @@ func (s *Service) handleTopicEvent(t *Topic, w http.ResponseWriter, r *http.Requ
 func (s *Service) handleListTopicHandlers(t *Topic, w http.ResponseWriter, r *http.Request) {}
 func (s *Service) handleTopicHandler(t *Topic, w http.ResponseWriter, r *http.Request)      {}
 
+func (s *Service) EventState(topic, event string) (EventState, bool) {
+	s.mu.RLock()
+	t, ok := s.topics[topic]
+	s.mu.RUnlock()
+	if !ok {
+		return EventState{}, false
+	}
+	return t.EventState(event)
+}
+
 func (s *Service) Collect(event Event) error {
 	s.mu.RLock()
 	topic := s.topics[event.Topic]
@@ -338,7 +348,7 @@ func (s *Service) TopicStatusEvents(pattern string, minLevel Level) map[string]m
 	s.mu.RLock()
 	topics := make([]*Topic, 0, len(s.topics))
 	for _, topic := range s.topics {
-		if topic.MaxLevel() >= minLevel && match(pattern, topic.name) {
+		if topic.MaxLevel() >= minLevel && match(pattern, topic.id) {
 			topics = append(topics, topic)
 		}
 	}
@@ -353,16 +363,16 @@ func (s *Service) TopicStatusEvents(pattern string, minLevel Level) map[string]m
 	return res
 }
 
-func match(pattern, name string) bool {
+func match(pattern, id string) bool {
 	if pattern == "" {
 		return true
 	}
-	matched, _ := path.Match(pattern, name)
+	matched, _ := path.Match(pattern, id)
 	return matched
 }
 
 type Topic struct {
-	name string
+	id string
 
 	mu sync.RWMutex
 
@@ -372,14 +382,14 @@ type Topic struct {
 	handlers []*handler
 }
 
-func newTopic(name string) *Topic {
+func newTopic(id string) *Topic {
 	return &Topic{
-		name:   name,
+		id:     id,
 		events: make(map[string]*EventState),
 	}
 }
 func (t *Topic) ID() string {
-	return t.name
+	return t.id
 }
 
 func (t *Topic) MaxLevel() Level {

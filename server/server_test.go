@@ -4401,7 +4401,6 @@ func testBatchAgent(t *testing.T, c *server.Config) {
     @outliers()
         .field('value')
         .scale(1.5)
-		.as('value')
     |count('value')
     |httpOut('count')
 `
