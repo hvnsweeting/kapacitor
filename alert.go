@@ -86,7 +86,8 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 	an.topic = n.Topic
 	// Create anonymous topic name
 	an.anonTopic = fmt.Sprintf("%s:%s:%s", et.tm.ID(), et.Task.ID, an.Name())
-	l.Println("D! topic", an.anonTopic)
+	l.Println("D! anonTopic", an.anonTopic)
+	l.Println("D! topic", an.topic)
 
 	// Create buffer pool for the templates
 	an.bufPool = sync.Pool{

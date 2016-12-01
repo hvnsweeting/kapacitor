@@ -250,6 +250,8 @@ func (s *Server) appendAlertService() {
 	l := s.LogService.NewLogger("[alert] ", log.LstdFlags)
 	srv := alert.NewService(s.config.Alert, l)
 
+	srv.HTTPDService = s.HTTPDService
+
 	s.AlertService = srv
 	s.TaskMaster.AlertService = srv
 	s.AppendService("alert", srv)

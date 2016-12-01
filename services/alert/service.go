@@ -3,12 +3,37 @@ package alert
 import (
 	"fmt"
 	"log"
+	"net/http"
+	"path"
 	"sort"
+	"strings"
 	"sync"
+
+	client "github.com/influxdata/kapacitor/client/v1"
+	"github.com/influxdata/kapacitor/services/httpd"
 )
 
-// eventBufferSize is the number of events to buffer to each handler per topic.
-const eventBufferSize = 100
+const (
+	// eventBufferSize is the number of events to buffer to each handler per topic.
+	eventBufferSize = 100
+
+	alertsPath         = "/alerts"
+	alertsPathAnchored = "/alerts/"
+
+	topicsPath             = alertsPath + "/topics"
+	topicsPathAnchored     = alertsPath + "/topics/"
+	topicsBasePath         = httpd.BasePath + topicsPath
+	topicsBasePathAnchored = httpd.BasePath + topicsPathAnchored
+
+	handlersPath         = alertsPath + "/handlers"
+	handlersPathAnchored = alertsPath + "/handlers/"
+
+	topicEventsPath   = "events"
+	topicHandlersPath = "handlers"
+
+	eventsRelation   = "events"
+	handlersRelation = "handlers"
+)
 
 type Service struct {
 	mu sync.RWMutex
@@ -16,6 +41,12 @@ type Service struct {
 	handlers map[string]HandlerConfig
 
 	topics map[string]*Topic
+
+	routes       []httpd.Route
+	HTTPDService interface {
+		AddRoutes([]httpd.Route) error
+		DelRoutes([]httpd.Route)
+	}
 
 	logger *log.Logger
 }
@@ -30,7 +61,34 @@ func NewService(c Config, l *log.Logger) *Service {
 }
 
 func (s *Service) Open() error {
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Define API routes
+	s.routes = []httpd.Route{
+		{
+			Method:      "GET",
+			Pattern:     topicsPath,
+			HandlerFunc: s.handleListTopics,
+		},
+		{
+			Method:      "GET",
+			Pattern:     topicsPathAnchored,
+			HandlerFunc: s.handleRouteTopic,
+		},
+		//{
+		//	Method:      "GET",
+		//	Pattern:     handlersPath,
+		//	HandlerFunc: s.handleListHandlers,
+		//},
+		//{
+		//	Method:      "GET",
+		//	Pattern:     handlersPathAnchored,
+		//	HandlerFunc: s.handleRouteTopic,
+		//},
+	}
+
+	return s.HTTPDService.AddRoutes(s.routes)
 }
 
 func (s *Service) Close() error {
@@ -40,8 +98,165 @@ func (s *Service) Close() error {
 		t.Close()
 		delete(s.topics, topic)
 	}
+	s.HTTPDService.DelRoutes(s.routes)
 	return nil
 }
+
+func validatePattern(pattern string) error {
+	_, err := path.Match(pattern, "")
+	return err
+}
+
+func (s *Service) handleListTopics(w http.ResponseWriter, r *http.Request) {
+	pattern := r.URL.Query().Get("pattern")
+	if err := validatePattern(pattern); err != nil {
+		httpd.HttpError(w, fmt.Sprint("invalide pattern: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
+	minLevelStr := r.URL.Query().Get("min-level")
+	minLevel, err := ParseLevel(minLevelStr)
+	if err != nil {
+		httpd.HttpError(w, err.Error(), true, http.StatusBadRequest)
+		return
+	}
+	topics := client.Topics{
+		Link:   client.Link{Relation: client.Self, Href: r.URL.String()},
+		Topics: s.TopicStatus(pattern, minLevel),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(topics, true))
+}
+
+const eventsPattern = "*/events"
+const eventPattern = "*/events/*"
+const handlersPattern = "*/handlers"
+const handlerPattern = "*/handlers/*"
+
+func (s *Service) topicIDFromPath(p string) (id string) {
+	d := p
+	for d != "." {
+		id = d
+		d = path.Dir(d)
+	}
+	return
+}
+
+func pathMatch(pattern, p string) (match bool) {
+	match, _ = path.Match(pattern, p)
+	return
+}
+
+func (s *Service) handleRouteTopic(w http.ResponseWriter, r *http.Request) {
+	p := strings.TrimPrefix(r.URL.Path, topicsBasePathAnchored)
+	id := s.topicIDFromPath(p)
+	s.mu.RLock()
+	t, ok := s.topics[id]
+	s.mu.RUnlock()
+	if !ok {
+		httpd.HttpError(w, fmt.Sprintf("topic %q does not exist", id), true, http.StatusNotFound)
+		return
+	}
+
+	switch {
+	case pathMatch(eventsPattern, p):
+		s.handleListTopicEvents(t, w, r)
+	case pathMatch(eventPattern, p):
+		s.handleTopicEvent(t, w, r)
+	case pathMatch(handlersPattern, p):
+		s.handleListTopicHandlers(t, w, r)
+	case pathMatch(handlerPattern, p):
+		s.handleTopicHandler(t, w, r)
+	default:
+		s.handleTopic(t, w, r)
+	}
+}
+
+func (s *Service) topicLink(id string) client.Link {
+	return client.Link{Relation: client.Self, Href: path.Join(topicsBasePath, id)}
+}
+func (s *Service) topicEventsLink(id string, r client.Relation) client.Link {
+	return client.Link{Relation: r, Href: path.Join(topicsBasePath, id, topicEventsPath)}
+}
+func (s *Service) topicEventLink(topic, event string) client.Link {
+	return client.Link{Relation: client.Self, Href: path.Join(topicsBasePath, topic, topicEventsPath, event)}
+}
+func (s *Service) topicHandlersLink(id string, r client.Relation) client.Link {
+	return client.Link{Relation: r, Href: path.Join(topicsBasePath, id, topicHandlersPath)}
+}
+func (s *Service) topicHandlerLink(topic, handler string) client.Link {
+	return client.Link{Relation: client.Self, Href: path.Join(topicsBasePath, topic, topicHandlersPath, handler)}
+}
+
+func (s *Service) convertTopic(t *Topic) client.Topic {
+	return client.Topic{
+		ID:           t.ID(),
+		Link:         s.topicLink(t.ID()),
+		Level:        t.MaxLevel().String(),
+		EventsLink:   s.topicEventsLink(t.ID(), eventsRelation),
+		HandlersLink: s.topicHandlersLink(t.ID(), handlersRelation),
+	}
+}
+
+func (s *Service) handleTopic(t *Topic, w http.ResponseWriter, r *http.Request) {
+	topic := s.convertTopic(t)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(topic, true))
+}
+
+func (s *Service) convertEventState(state EventState) client.EventState {
+	return client.EventState{
+		Message:  state.Message,
+		Details:  state.Details,
+		Time:     state.Time,
+		Duration: state.Duration,
+		Level:    state.Level.String(),
+	}
+}
+
+func (s *Service) handleListTopicEvents(t *Topic, w http.ResponseWriter, r *http.Request) {
+	minLevelStr := r.URL.Query().Get("min-level")
+	minLevel, err := ParseLevel(minLevelStr)
+	if err != nil {
+		httpd.HttpError(w, err.Error(), true, http.StatusBadRequest)
+		return
+	}
+	events := t.Events(minLevel)
+	res := client.Events{
+		Link:   s.topicEventsLink(t.ID(), client.Self),
+		Topic:  t.ID(),
+		Events: make([]client.Event, 0, len(events)),
+	}
+	for id, state := range events {
+		res.Events = append(res.Events, client.Event{
+			Link:  s.topicEventLink(t.ID(), id),
+			ID:    id,
+			State: s.convertEventState(state),
+		})
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(res, true))
+}
+
+func (s *Service) handleTopicEvent(t *Topic, w http.ResponseWriter, r *http.Request) {
+	id := path.Base(r.URL.Path)
+	state, ok := t.EventState(id)
+	if !ok {
+		httpd.HttpError(w, fmt.Sprintf("event %q does not exist for topic %q", id, t.ID()), true, http.StatusNotFound)
+		return
+	}
+	event := client.Event{
+		Link:  s.topicEventLink(t.ID(), id),
+		ID:    id,
+		State: s.convertEventState(state),
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(event, true))
+}
+
+func (s *Service) handleListTopicHandlers(t *Topic, w http.ResponseWriter, r *http.Request) {}
+func (s *Service) handleTopicHandler(t *Topic, w http.ResponseWriter, r *http.Request)      {}
 
 func (s *Service) Collect(event Event) error {
 	s.mu.RLock()
@@ -49,7 +264,15 @@ func (s *Service) Collect(event Event) error {
 	s.mu.RUnlock()
 
 	if topic == nil {
-		return nil
+		// Create the empty topic
+		s.mu.Lock()
+		// Check again if the topic was created, now that we have the write lock
+		topic = s.topics[event.Topic]
+		if topic == nil {
+			topic = newTopic(event.Topic)
+			s.topics[event.Topic] = topic
+		}
+		s.mu.Unlock()
 	}
 
 	return topic.Handle(event)
@@ -96,15 +319,13 @@ func (s *Service) DeregisterHandler(topics []string, h Handler) {
 
 // TopicStatus returns the max alert level for each topic matching 'pattern', not returning
 // any topics with max alert levels less severe than 'minLevel'
-//
-// TODO: implement pattern restriction
-func (s *Service) TopicStatus(pattern string, minLevel Level) map[string]Level {
+func (s *Service) TopicStatus(pattern string, minLevel Level) []client.Topic {
 	s.mu.RLock()
-	res := make(map[string]Level, len(s.topics))
-	for name, topic := range s.topics {
+	res := make([]client.Topic, 0, len(s.topics))
+	for _, topic := range s.topics {
 		level := topic.MaxLevel()
-		if level >= minLevel && match(pattern, topic.name) {
-			res[name] = level
+		if level >= minLevel && match(pattern, topic.ID()) {
+			res = append(res, s.convertTopic(topic))
 		}
 	}
 	s.mu.RUnlock()
@@ -113,9 +334,7 @@ func (s *Service) TopicStatus(pattern string, minLevel Level) map[string]Level {
 
 // TopicStatusDetails is similar to TopicStatus, but will additionally return
 // at least 'minLevel' severity
-//
-// TODO: implement pattern restriction
-func (s *Service) TopicStatusDetails(pattern string, minLevel Level) map[string]map[string]EventState {
+func (s *Service) TopicStatusEvents(pattern string, minLevel Level) map[string]map[string]EventState {
 	s.mu.RLock()
 	topics := make([]*Topic, 0, len(s.topics))
 	for _, topic := range s.topics {
@@ -128,26 +347,18 @@ func (s *Service) TopicStatusDetails(pattern string, minLevel Level) map[string]
 	res := make(map[string]map[string]EventState, len(topics))
 
 	for _, topic := range topics {
-		// TODO: move this into a method of Topic
-		topic.mu.RLock()
-		idx := sort.Search(len(topic.sorted), func(i int) bool {
-			return topic.sorted[i].Level < minLevel
-		})
-		if idx > 0 {
-			ids := make(map[string]EventState, idx)
-			for i := 0; i < idx; i++ {
-				ids[topic.sorted[i].ID] = *topic.sorted[i]
-			}
-			res[topic.name] = ids
-		}
-		topic.mu.RUnlock()
+		res[topic.ID()] = topic.Events(minLevel)
 	}
 
 	return res
 }
 
 func match(pattern, name string) bool {
-	return true
+	if pattern == "" {
+		return true
+	}
+	matched, _ := path.Match(pattern, name)
+	return matched
 }
 
 type Topic struct {
@@ -166,6 +377,9 @@ func newTopic(name string) *Topic {
 		name:   name,
 		events: make(map[string]*EventState),
 	}
+}
+func (t *Topic) ID() string {
+	return t.name
 }
 
 func (t *Topic) MaxLevel() Level {
@@ -204,6 +418,29 @@ func (t *Topic) RemoveHandler(h Handler) {
 			break
 		}
 	}
+}
+
+func (t *Topic) Events(minLevel Level) map[string]EventState {
+	t.mu.RLock()
+	events := make(map[string]EventState, len(t.sorted))
+	for _, e := range t.sorted {
+		if e.Level < minLevel {
+			break
+		}
+		events[e.ID] = *e
+	}
+	t.mu.RUnlock()
+	return events
+}
+
+func (t *Topic) EventState(event string) (EventState, bool) {
+	t.mu.RLock()
+	state, ok := t.events[event]
+	t.mu.RUnlock()
+	if ok {
+		return *state, true
+	}
+	return EventState{}, false
 }
 
 func (t *Topic) Close() {

@@ -158,47 +158,14 @@ func New(conf Config) (*Client, error) {
 	}, nil
 }
 
-type Relation int
+type Relation string
 
 const (
-	Self Relation = iota
-	Next
-	Previous
+	Self Relation = "self"
 )
 
-func (r Relation) MarshalText() ([]byte, error) {
-	switch r {
-	case Self:
-		return []byte("self"), nil
-	case Next:
-		return []byte("next"), nil
-	case Previous:
-		return []byte("prev"), nil
-	default:
-		return nil, fmt.Errorf("unknown Relation %d", r)
-	}
-}
-
-func (r *Relation) UnmarshalText(text []byte) error {
-	switch s := string(text); s {
-	case "self":
-		*r = Self
-	case "next":
-		*r = Next
-	case "prev":
-		*r = Previous
-	default:
-		return fmt.Errorf("unknown Relation %s", s)
-	}
-	return nil
-}
-
 func (r Relation) String() string {
-	s, err := r.MarshalText()
-	if err != nil {
-		return err.Error()
-	}
-	return string(s)
+	return string(r)
 }
 
 type Link struct {
@@ -1738,6 +1705,39 @@ func (c *Client) DoServiceTest(link Link, sto ServiceTestOptions) (ServiceTestRe
 		return ServiceTestResult{}, err
 	}
 	return r, nil
+}
+
+type Topics struct {
+	Link   Link    `json:"link"`
+	Topics []Topic `json:"topics"`
+}
+
+type Topic struct {
+	Link         Link   `json:"link"`
+	ID           string `json:"id"`
+	Level        string `json:"level"`
+	EventsLink   Link   `json:"events-link"`
+	HandlersLink Link   `json:"handlers-link"`
+}
+
+type Events struct {
+	Link   Link    `json:"link"`
+	Topic  string  `json:"topic"`
+	Events []Event `json:"events"`
+}
+
+type Event struct {
+	Link  Link       `json:"link"`
+	ID    string     `json:"id"`
+	State EventState `json:"state"`
+}
+
+type EventState struct {
+	Message  string
+	Details  string
+	Time     time.Time
+	Duration time.Duration
+	Level    string
 }
 
 type LogLevelOptions struct {

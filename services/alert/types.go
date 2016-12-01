@@ -3,6 +3,7 @@ package alert
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/influxdata/influxdb/influxql"
@@ -149,4 +150,9 @@ func (l *Level) UnmarshalText(text []byte) error {
 	}
 
 	return fmt.Errorf("unknown alert level '%s'", text)
+}
+
+func ParseLevel(s string) (l Level, err error) {
+	err = l.UnmarshalText([]byte(strings.ToUpper(s)))
+	return
 }

@@ -89,75 +89,63 @@ func (ts *Service) Open() error {
 	// Define API routes
 	ts.routes = []httpd.Route{
 		{
-			Name:        "task",
 			Method:      "GET",
 			Pattern:     tasksPathAnchored,
 			HandlerFunc: ts.handleTask,
 		},
 		{
-			Name:        "deleteTask",
 			Method:      "DELETE",
 			Pattern:     tasksPathAnchored,
 			HandlerFunc: ts.handleDeleteTask,
 		},
 		{
 			// Satisfy CORS checks.
-			Name:        "/tasks/-cors",
 			Method:      "OPTIONS",
 			Pattern:     tasksPathAnchored,
 			HandlerFunc: httpd.ServeOptions,
 		},
 		{
-			Name:        "updateTask",
 			Method:      "PATCH",
 			Pattern:     tasksPathAnchored,
 			HandlerFunc: ts.handleUpdateTask,
 		},
 		{
-			Name:        "listTasks",
 			Method:      "GET",
 			Pattern:     tasksPath,
 			HandlerFunc: ts.handleListTasks,
 		},
 		{
-			Name:        "createTask",
 			Method:      "POST",
 			Pattern:     tasksPath,
 			HandlerFunc: ts.handleCreateTask,
 		},
 		{
-			Name:        "template",
 			Method:      "GET",
 			Pattern:     templatesPathAnchored,
 			HandlerFunc: ts.handleTemplate,
 		},
 		{
-			Name:        "deleteTemplate",
 			Method:      "DELETE",
 			Pattern:     templatesPathAnchored,
 			HandlerFunc: ts.handleDeleteTemplate,
 		},
 		{
 			// Satisfy CORS checks.
-			Name:        "/templates/-cors",
 			Method:      "OPTIONS",
 			Pattern:     templatesPathAnchored,
 			HandlerFunc: httpd.ServeOptions,
 		},
 		{
-			Name:        "updateTemplate",
 			Method:      "PATCH",
 			Pattern:     templatesPathAnchored,
 			HandlerFunc: ts.handleUpdateTemplate,
 		},
 		{
-			Name:        "listTemplates",
 			Method:      "GET",
 			Pattern:     templatesPath,
 			HandlerFunc: ts.handleListTemplates,
 		},
 		{
-			Name:        "createTemplate",
 			Method:      "POST",
 			Pattern:     templatesPath,
 			HandlerFunc: ts.handleCreateTemplate,

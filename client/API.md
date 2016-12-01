@@ -405,7 +405,7 @@ GET /kapacitor/v1/tasks
 Optionally specify a glob `pattern` to list only matching tasks.
 
 ```
-GET /kapacitor/v1/task?pattern=TASK*
+GET /kapacitor/v1/tasks?pattern=TASK*
 ```
 
 ```json
@@ -1355,7 +1355,15 @@ You can either specify the alert topic in the TICKscript or one will be generate
 
 To query the list of available topics make a GET requests to `/kapacitor/v1/alerts/topics`.
 
+| Query Parameter | Default | Purpose                                                                                                                                                            |
+| --------------- | ------- | -------                                                                                                                                                            |
+| min-level       | OK      | Only return topics that are greater or equal to the min-level. Valid values include OK, INFO, WARNING, CRITICAL.                                                   |
+| pattern         | *       | Filter results based on the pattern. Uses standard shell glob matching on the  topic ID, see [this](https://golang.org/pkg/path/filepath/#Match) for more details. |
+
+
 #### Example
+
+Get all topics.
 
 ```
 GET /kapacitor/v1/alerts/topics
@@ -1367,17 +1375,39 @@ GET /kapacitor/v1/alerts/topics
     "topics: [
         {
             "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/system"},
-            "eventsLink" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
-            "handlersLink": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
+            "events-link" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
+            "handlers-link": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
             "id": "system",
             "level":"CRITICAL"
         },
         {
             "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/app"},
-            "eventsLink" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/app/events"},
-            "handlersLink": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/app/handlers"},
+            "events-link" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/app/events"},
+            "handlers-link": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/app/handlers"},
             "id": "app",
             "level":"OK"
+        }
+    ]
+}
+```
+
+Get all topics in a WARNING or CRITICAL state.
+
+
+```
+GET /kapacitor/v1/alerts/topics?min-level=WARNING
+```
+
+```
+{
+    "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics"},
+    "topics: [
+        {
+            "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/system"},
+            "events-link" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
+            "handlers-link": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
+            "id": "system",
+            "level":"CRITICAL"
         }
     ]
 }
@@ -1386,7 +1416,6 @@ GET /kapacitor/v1/alerts/topics
 ### Topic Status
 
 To query the status of a topic make a GET request to `/kapacitor/v1/alerts/topics/<topic id>`.
-
 #### Example
 
 ```
@@ -1398,8 +1427,8 @@ GET /kapacitor/v1/alerts/topics/system
     "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/system"},
     "id": "system",
     "level":"CRITICAL"
-    "eventsLink" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
-    "handlersLink": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
+    "events-link" : {"rel":"events","href":"/kapacitor/v1/alerts/topics/system/events"},
+    "handlers-link": {"rel":"handlers","href":"/kapacitor/v1/alerts/topics/system/handlers"},
 }
 ```
 
@@ -1416,7 +1445,7 @@ GET /kapacitor/v1/alerts/topics/system/events
 ```
 {
     "link": {"rel":"self","href":"/kapacitor/v1/alerts/topics/system/events"},
-    "id": "system",
+    "topic": "system",
     "events": [
         {
             "link":{"rel":"self","href":"/kapacitor/v1/topics/system/events/cpu"},
@@ -1485,7 +1514,7 @@ GET /kapacitor/v1/alerts/topics/system/handlers
 ```
 {
     "link":{"rel":"self","href":"/kapacitor/v1/topics/system/handlers"},
-    "id": "system",
+    "topic": "system",
     "handlers": [
         {
             "type" : "identified",
