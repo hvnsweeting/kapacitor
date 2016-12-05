@@ -43,7 +43,7 @@ const (
 type Service struct {
 	mu sync.RWMutex
 
-	handlers map[string]HandlerConfig
+	handlers map[string]HandlerSpec
 
 	topics map[string]*Topic
 
@@ -58,7 +58,7 @@ type Service struct {
 
 func NewService(c Config, l *log.Logger) *Service {
 	s := &Service{
-		handlers: make(map[string]HandlerConfig),
+		handlers: make(map[string]HandlerSpec),
 		topics:   make(map[string]*Topic),
 		logger:   l,
 	}
@@ -255,8 +255,11 @@ func (s *Service) handleTopicEvent(t *Topic, w http.ResponseWriter, r *http.Requ
 	w.Write(httpd.MarshalJSON(event, true))
 }
 
-func (s *Service) handleListTopicHandlers(t *Topic, w http.ResponseWriter, r *http.Request) {}
-func (s *Service) handleTopicHandler(t *Topic, w http.ResponseWriter, r *http.Request)      {}
+func (s *Service) handleListTopicHandlers(t *Topic, w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (s *Service) handleTopicHandler(t *Topic, w http.ResponseWriter, r *http.Request) {}
 
 func (s *Service) EventState(topic, event string) (EventState, bool) {
 	s.mu.RLock()
@@ -298,7 +301,7 @@ func (s *Service) DeleteTopic(topic string) {
 	}
 }
 
-func (s *Service) RegisterHandler(topics []string, h Handler) {
+func (s *Service) RegisterHandler(topics []string, spec HandlerSpec, h Handler) {
 	if len(topics) == 0 || h == nil {
 		return
 	}
@@ -306,11 +309,18 @@ func (s *Service) RegisterHandler(topics []string, h Handler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if _, ok := s.handlers[spec.ID]; ok {
+		// Handler already exists
+		return
+	}
+
+	s.handlers[spec.ID] = spec
+
 	for _, topic := range topics {
 		if _, ok := s.topics[topic]; !ok {
 			s.topics[topic] = newTopic(topic)
 		}
-		s.topics[topic].AddHandler(h)
+		s.topics[topic].AddHandler(spec, h)
 	}
 }
 
@@ -321,6 +331,8 @@ func (s *Service) DeregisterHandler(topics []string, h Handler) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	delete(s.handlers, spec.ID)
 
 	for _, topic := range topics {
 		s.topics[topic].RemoveHandler(h)

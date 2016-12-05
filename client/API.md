@@ -1519,12 +1519,20 @@ GET /kapacitor/v1/alerts/topics/system/handlers
         {
             "type" : "identified",
             "link":{"rel":"handler","href":"/kapacitor/v1/alerts/handlers/slack"},
-            "id":"slack"
+            "id":"slack",
+            "topics": ["system", "app"],
+            "actions": [
+                {"slack": {"channel":"#alerts"}}
+            ]
         },
         {
             "type" : "identified",
             "link":{"rel":"handler","href":"/kapacitor/v1/alerts/handlers/smtp"},
-            "id":"smtp"
+            "id":"smtp",
+            "topics": ["system", "app"],
+            "actions": [
+                {"smtp": {}}
+            ]
         }
     ]
 }
@@ -1570,6 +1578,7 @@ GET /kapacitor/v1/alerts/handlers
     "link":{"rel":"self","href":"/kapacitor/v1/handlers"},
     "handlers": [
         {
+            "type" : "identified",
             "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/slack"},
             "id":"slack",
             "topics": ["system", "app"],
@@ -1578,6 +1587,7 @@ GET /kapacitor/v1/alerts/handlers
             ]
         },
         {
+            "type" : "identified",
             "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/smtp"},
             "id":"smtp",
             "topics": ["system", "app"],
@@ -1588,6 +1598,7 @@ GET /kapacitor/v1/alerts/handlers
     ]
 }
 ```
+
 ### Get a Handler
 
 To query information about a specific handler make a GET request to `/kapacitor/v1/alerts/handlers/<handler id>`.
@@ -1600,6 +1611,7 @@ GET /kapacitor/v1/alerts/handlers/<handler id>
 
 ```
 {
+    "type" : "identified",
     "link":{"rel":"self","href":"/kapacitor/v1/handlers/slack"},
     "id":"slack",
     "topics": ["system", "app"],
@@ -1627,6 +1639,7 @@ POST /kapacitor/v1/alerts/handlers
 
 ```
 {
+    "type" : "identified",
     "link":{"rel":"self","href":"/kapacitor/v1/handlers/slack"},
     "id": "slack",
     "topics": ["system", "app"],
@@ -1658,6 +1671,7 @@ PATCH /kapacitor/v1/alerts/handlers/slack
 
 ```
 {
+    "type" : "identified",
     "link":{"rel":"self","href":"/kapacitor/v1/handlers/slack"},
     "id": "slack",
     "topics": ["system", "test"],
@@ -1684,6 +1698,7 @@ PUT /kapacitor/v1/alerts/handlers/slack
 
 ```
 {
+    "type" : "identified",
     "link":{"rel":"self","href":"/kapacitor/v1/handlers/slack"},
     "id": "slack",
     "topics": ["system", "test"],

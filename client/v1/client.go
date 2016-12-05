@@ -1720,7 +1720,7 @@ type Topic struct {
 	HandlersLink Link   `json:"handlers-link"`
 }
 
-type Events struct {
+type TopicEvents struct {
 	Link   Link    `json:"link"`
 	Topic  string  `json:"topic"`
 	Events []Event `json:"events"`
@@ -1740,14 +1740,62 @@ type EventState struct {
 	Level    string
 }
 
-type AlertHandlers struct {
+type TopicHandlers struct {
+	Link     Link
+	Topics   []string
+	Handlers []Handler
+}
+
+type HandlerType int
+
+const (
+	IdentifiedHandler Handler = iota
+	AnonymousHandler
+)
+
+func (h HandlerType) MarshalText() ([]byte, error) {
+	switch h {
+	case IdentifiedHandler:
+		return []byte("identified"), nil
+	case AnonymousHandler:
+		return []byte("anonymous"), nil
+	default:
+		return nil, fmt.Errorf("unknown HandlerType %d", h)
+	}
+}
+
+func (h *HandlerType) UnmarshalText(text []byte) error {
+	switch t := string(text); t {
+	case "identified":
+		*h = IdentifiedHandler
+	case "anonymous":
+		*h = AnonymousHandler
+	default:
+		return fmt.Errorf("unknown Handler %s", t)
+	}
+	return nil
+}
+
+func (h HandlerType) String() string {
+	t, err := h.MarshalText()
+	if err != nil {
+		return err.Error()
+	}
+	return string(t)
+}
+
+type Handler struct {
+	Type HandlerType
+
+	Kind string
+
 	Link    Link
 	ID      string
 	Topics  []string
-	Actions []AlertHandlerAction
+	Actions []HandlerAction
 }
 
-type AlertHandlerAction map[string]map[string]interface{}
+type HandlerAction map[string]map[string]interface{}
 
 type LogLevelOptions struct {
 	Level string `json:"level"`
