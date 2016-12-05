@@ -31,10 +31,8 @@ func (e Event) TemplateData() TemplateData {
 }
 
 type Handler interface {
-	// Handle is responsible for taking action on the event and honoring the context.
+	// Handle is responsible for taking action on the event.
 	Handle(event Event)
-	// Spec returns the specification of this handler
-	Spec() HandlerSpec
 }
 
 // HandlerSpec provides all the necessary information to create a handler.
@@ -48,6 +46,15 @@ type HandlerSpec struct {
 type HandlerActionSpec struct {
 	Kind    string
 	Options map[string]interface{}
+}
+
+type HandlerAction interface {
+	Handle(event Event)
+	SetOutput(edge Edge)
+}
+
+type Edge interface {
+	Collect(event Event)
 }
 
 type EventState struct {

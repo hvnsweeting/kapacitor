@@ -1,0 +1,411 @@
+package alert
+
+import (
+	"fmt"
+	"log"
+	"path"
+	"sort"
+	"sync"
+)
+
+const (
+	// eventBufferSize is the number of events to buffer to each handler per topic.
+	eventBufferSize = 100
+)
+
+type system struct {
+	mu sync.RWMutex
+
+	topics map[string]*Topic
+
+	logger *log.Logger
+}
+
+func newSystem(l *log.Logger) *system {
+	s := &system{
+		topics: make(map[string]*Topic),
+		logger: l,
+	}
+	return s
+}
+
+func (s *system) Open() error {
+	return nil
+}
+
+func (s *system) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for topic, t := range s.topics {
+		t.Close()
+		delete(s.topics, topic)
+	}
+	return nil
+}
+
+func (s *system) GetOrCreateTopic(id string) *Topic {
+	// First try and get topic with read lock
+	s.mu.RLock()
+	topic, ok := s.topics[id]
+	s.mu.RUnlock()
+	if ok {
+		return topic
+	}
+	// Get write lock
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Check if topic exists now that we have the write lock
+	topic, ok = s.topics[id]
+	if !ok {
+		topic = newTopic(id)
+		s.topics[id] = topic
+	}
+	return topic
+}
+
+func (s *system) Topic(id string) (*Topic, bool) {
+	s.mu.RLock()
+	t, ok := s.topics[id]
+	s.mu.RUnlock()
+	return t, ok
+}
+
+func (s *system) EventState(topic, event string) (EventState, bool) {
+	s.mu.RLock()
+	t, ok := s.topics[topic]
+	s.mu.RUnlock()
+	if !ok {
+		return EventState{}, false
+	}
+	return t.EventState(event)
+}
+
+func (s *system) Collect(event Event) error {
+	s.mu.RLock()
+	topic := s.topics[event.Topic]
+	s.mu.RUnlock()
+
+	if topic == nil {
+		// Create the empty topic
+		s.mu.Lock()
+		// Check again if the topic was created, now that we have the write lock
+		topic = s.topics[event.Topic]
+		if topic == nil {
+			topic = newTopic(event.Topic)
+			s.topics[event.Topic] = topic
+		}
+		s.mu.Unlock()
+	}
+
+	return topic.Handle(event)
+}
+
+func (s *system) DeleteTopic(topic string) {
+	s.mu.Lock()
+	t := s.topics[topic]
+	delete(s.topics, topic)
+	s.mu.Unlock()
+	if t != nil {
+		t.Close()
+	}
+}
+
+func (s *system) RegisterHandler(topics []string, h Handler) {
+	if len(topics) == 0 || h == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, topic := range topics {
+		if _, ok := s.topics[topic]; !ok {
+			s.topics[topic] = newTopic(topic)
+		}
+		s.topics[topic].AddHandler(h)
+	}
+}
+
+func (s *system) DeregisterHandler(topics []string, h Handler) {
+	if len(topics) == 0 || h == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, topic := range topics {
+		s.topics[topic].RemoveHandler(h)
+	}
+}
+
+// TopicStatus returns the max alert level for each topic matching 'pattern', not returning
+// any topics with max alert levels less severe than 'minLevel'
+func (s *system) TopicStatus(pattern string, minLevel Level) map[string]Level {
+	s.mu.RLock()
+	res := make(map[string]Level, len(s.topics))
+	for _, topic := range s.topics {
+		if !match(pattern, topic.ID()) {
+			continue
+		}
+		level := topic.MaxLevel()
+		if level >= minLevel {
+			res[topic.ID()] = level
+		}
+	}
+	s.mu.RUnlock()
+	return res
+}
+
+// TopicStatusDetails is similar to TopicStatus, but will additionally return
+// at least 'minLevel' severity
+func (s *system) TopicStatusEvents(pattern string, minLevel Level) map[string]map[string]EventState {
+	s.mu.RLock()
+	topics := make([]*Topic, 0, len(s.topics))
+	for _, topic := range s.topics {
+		if topic.MaxLevel() >= minLevel && match(pattern, topic.id) {
+			topics = append(topics, topic)
+		}
+	}
+	s.mu.RUnlock()
+
+	res := make(map[string]map[string]EventState, len(topics))
+
+	for _, topic := range topics {
+		res[topic.ID()] = topic.Events(minLevel)
+	}
+
+	return res
+}
+
+func match(pattern, id string) bool {
+	if pattern == "" {
+		return true
+	}
+	matched, _ := path.Match(pattern, id)
+	return matched
+}
+
+type Topic struct {
+	id string
+
+	mu sync.RWMutex
+
+	events map[string]*EventState
+	sorted []*EventState
+
+	handlers []*handler
+}
+
+func newTopic(id string) *Topic {
+	return &Topic{
+		id:     id,
+		events: make(map[string]*EventState),
+	}
+}
+func (t *Topic) ID() string {
+	return t.id
+}
+
+func (t *Topic) MaxLevel() Level {
+	level := OK
+	t.mu.RLock()
+	if len(t.sorted) > 0 {
+		level = t.sorted[0].Level
+	}
+	t.mu.RUnlock()
+	return level
+}
+
+func (t *Topic) AddHandler(h Handler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, cur := range t.handlers {
+		if cur.Equal(h) {
+			return
+		}
+	}
+	hdlr := newHandler(h)
+	t.handlers = append(t.handlers, hdlr)
+}
+
+func (t *Topic) RemoveHandler(h Handler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for i := 0; i < len(t.handlers); i++ {
+		if t.handlers[i].Equal(h) {
+			// Close handler
+			t.handlers[i].Close()
+			if i < len(t.handlers)-1 {
+				t.handlers[i] = t.handlers[len(t.handlers)-1]
+			}
+			t.handlers = t.handlers[:len(t.handlers)-1]
+			break
+		}
+	}
+}
+
+func (t *Topic) Events(minLevel Level) map[string]EventState {
+	t.mu.RLock()
+	events := make(map[string]EventState, len(t.sorted))
+	for _, e := range t.sorted {
+		if e.Level < minLevel {
+			break
+		}
+		events[e.ID] = *e
+	}
+	t.mu.RUnlock()
+	return events
+}
+
+func (t *Topic) EventState(event string) (EventState, bool) {
+	t.mu.RLock()
+	state, ok := t.events[event]
+	t.mu.RUnlock()
+	if ok {
+		return *state, true
+	}
+	return EventState{}, false
+}
+
+func (t *Topic) Close() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Close all handlers
+	for _, h := range t.handlers {
+		h.Close()
+	}
+	t.handlers = nil
+}
+
+func (t *Topic) Handle(event Event) error {
+	t.updateEvent(event.State)
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	// Handle event
+	var errs multiError
+	for _, h := range t.handlers {
+		err := h.Handle(event)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) != 0 {
+		return errs
+	}
+	return nil
+}
+
+// updateEvent will store the latest state for the given ID.
+func (t *Topic) updateEvent(state EventState) {
+	var needSort bool
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur := t.events[state.ID]
+	if cur == nil {
+		needSort = true
+		cur = new(EventState)
+		t.events[state.ID] = cur
+		t.sorted = append(t.sorted, cur)
+	}
+	needSort = needSort || cur.Level != state.Level
+
+	*cur = state
+
+	if needSort {
+		sort.Sort(sortedStates(t.sorted))
+	}
+}
+
+type sortedStates []*EventState
+
+func (e sortedStates) Len() int          { return len(e) }
+func (e sortedStates) Swap(i int, j int) { e[i], e[j] = e[j], e[i] }
+func (e sortedStates) Less(i int, j int) bool {
+	if e[i].Level > e[j].Level {
+		return true
+	}
+	return e[i].ID < e[j].ID
+}
+
+// handler wraps a Handler implementation in order to provide buffering and non-blocking event handling.
+type handler struct {
+	h        Handler
+	events   chan Event
+	aborting chan struct{}
+	wg       sync.WaitGroup
+}
+
+func newHandler(h Handler) *handler {
+	hdlr := &handler{
+		h:        h,
+		events:   make(chan Event, eventBufferSize),
+		aborting: make(chan struct{}),
+	}
+	hdlr.wg.Add(1)
+	go func() {
+		defer hdlr.wg.Done()
+		hdlr.run()
+	}()
+	return hdlr
+}
+
+func (h *handler) Equal(o Handler) (b bool) {
+	defer func() {
+		// Recover in case the interface concrete type is not a comparable type.
+		r := recover()
+		if r != nil {
+			b = false
+		}
+	}()
+	b = h.h == o
+	return
+}
+
+func (h *handler) Close() {
+	close(h.events)
+	h.wg.Wait()
+}
+
+func (h *handler) Abort() {
+	close(h.aborting)
+	h.wg.Wait()
+}
+
+func (h *handler) Handle(event Event) error {
+	select {
+	case h.events <- event:
+		return nil
+	default:
+		return fmt.Errorf("failed to deliver event %q to handler", event.State.ID)
+	}
+}
+
+func (h *handler) run() {
+	for {
+		select {
+		case event, ok := <-h.events:
+			if !ok {
+				return
+			}
+			h.h.Handle(event)
+		case <-h.aborting:
+			return
+		}
+	}
+}
+
+// multiError is a list of errors.
+type multiError []error
+
+func (e multiError) Error() string {
+	if len(e) == 1 {
+		return e[0].Error()
+	}
+	msg := "multiple errors:"
+	for _, err := range e {
+		msg += "\n" + err.Error()
+	}
+	return msg
+}

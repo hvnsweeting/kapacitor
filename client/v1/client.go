@@ -1749,7 +1749,7 @@ type TopicHandlers struct {
 type HandlerType int
 
 const (
-	IdentifiedHandler Handler = iota
+	IdentifiedHandler HandlerType = iota
 	AnonymousHandler
 )
 
