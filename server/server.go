@@ -427,6 +427,8 @@ func (s *Server) appendSlackService() {
 	srv := slack.NewService(c, l)
 	s.TaskMaster.SlackService = srv
 
+	s.AlertService.Slack = srv
+
 	s.SetDynamicService("slack", srv)
 	s.AppendService("slack", srv)
 }

@@ -50,11 +50,7 @@ type HandlerActionSpec struct {
 
 type HandlerAction interface {
 	Handle(event Event)
-	SetOutput(edge Edge)
-}
-
-type Edge interface {
-	Collect(event Event)
+	SetNext(h Handler)
 }
 
 type EventState struct {

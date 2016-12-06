@@ -37,30 +37,10 @@ func (s *system) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for topic, t := range s.topics {
-		t.Close()
+		t.close()
 		delete(s.topics, topic)
 	}
 	return nil
-}
-
-func (s *system) GetOrCreateTopic(id string) *Topic {
-	// First try and get topic with read lock
-	s.mu.RLock()
-	topic, ok := s.topics[id]
-	s.mu.RUnlock()
-	if ok {
-		return topic
-	}
-	// Get write lock
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Check if topic exists now that we have the write lock
-	topic, ok = s.topics[id]
-	if !ok {
-		topic = newTopic(id)
-		s.topics[id] = topic
-	}
-	return topic
 }
 
 func (s *system) Topic(id string) (*Topic, bool) {
@@ -97,7 +77,7 @@ func (s *system) Collect(event Event) error {
 		s.mu.Unlock()
 	}
 
-	return topic.Handle(event)
+	return topic.handleEvent(event)
 }
 
 func (s *system) DeleteTopic(topic string) {
@@ -106,7 +86,7 @@ func (s *system) DeleteTopic(topic string) {
 	delete(s.topics, topic)
 	s.mu.Unlock()
 	if t != nil {
-		t.Close()
+		t.close()
 	}
 }
 
@@ -122,7 +102,7 @@ func (s *system) RegisterHandler(topics []string, h Handler) {
 		if _, ok := s.topics[topic]; !ok {
 			s.topics[topic] = newTopic(topic)
 		}
-		s.topics[topic].AddHandler(h)
+		s.topics[topic].addHandler(h)
 	}
 }
 
@@ -135,7 +115,7 @@ func (s *system) DeregisterHandler(topics []string, h Handler) {
 	defer s.mu.Unlock()
 
 	for _, topic := range topics {
-		s.topics[topic].RemoveHandler(h)
+		s.topics[topic].removeHandler(h)
 	}
 }
 
@@ -217,7 +197,7 @@ func (t *Topic) MaxLevel() Level {
 	return level
 }
 
-func (t *Topic) AddHandler(h Handler) {
+func (t *Topic) addHandler(h Handler) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, cur := range t.handlers {
@@ -229,7 +209,7 @@ func (t *Topic) AddHandler(h Handler) {
 	t.handlers = append(t.handlers, hdlr)
 }
 
-func (t *Topic) RemoveHandler(h Handler) {
+func (t *Topic) removeHandler(h Handler) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for i := 0; i < len(t.handlers); i++ {
@@ -268,7 +248,7 @@ func (t *Topic) EventState(event string) (EventState, bool) {
 	return EventState{}, false
 }
 
-func (t *Topic) Close() {
+func (t *Topic) close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Close all handlers
@@ -278,7 +258,7 @@ func (t *Topic) Close() {
 	t.handlers = nil
 }
 
-func (t *Topic) Handle(event Event) error {
+func (t *Topic) handleEvent(event Event) error {
 	t.updateEvent(event.State)
 	t.mu.RLock()
 	defer t.mu.RUnlock()
