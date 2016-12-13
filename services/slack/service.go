@@ -10,8 +10,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/influxdata/kapacitor/services/alert"
-	"github.com/mitchellh/mapstructure"
+	"github.com/influxdata/kapacitor/alert"
 	"github.com/pkg/errors"
 )
 
@@ -192,21 +191,6 @@ type handler struct {
 	logger *log.Logger
 }
 
-func (s *Service) HandlerFromOptions(options map[string]interface{}, l *log.Logger) (alert.Handler, error) {
-	c := HandlerConfig{}
-	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		ErrorUnused: true,
-		Result:      &c,
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to understand Slack handler options")
-	}
-	if err := dec.Decode(options); err != nil {
-		return nil, errors.Wrap(err, "failed to understand Slack handler options")
-	}
-	return s.Handler(c, l), nil
-
-}
 func (s *Service) Handler(c HandlerConfig, l *log.Logger) alert.Handler {
 	return &handler{
 		s:      s,

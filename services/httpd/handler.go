@@ -122,6 +122,7 @@ func NewHandler(
 		"GET",
 		"POST",
 		"PATCH",
+		"PUT",
 		"DELETE",
 		"HEAD",
 		"OPTIONS",
@@ -621,7 +622,7 @@ func requiredPrivilegeForHTTPMethod(method string) (auth.Privilege, error) {
 		return auth.NoPrivileges, nil
 	case "GET":
 		return auth.ReadPrivilege, nil
-	case "POST", "PATCH":
+	case "POST", "PATCH", "PUT":
 		return auth.WritePrivilege, nil
 	case "DELETE":
 		return auth.DeletePrivilege, nil

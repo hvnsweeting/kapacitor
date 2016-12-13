@@ -13,7 +13,7 @@ const (
 	eventBufferSize = 100
 )
 
-type system struct {
+type Topics struct {
 	mu sync.RWMutex
 
 	topics map[string]*Topic
@@ -21,19 +21,19 @@ type system struct {
 	logger *log.Logger
 }
 
-func newSystem(l *log.Logger) *system {
-	s := &system{
+func NewTopics(l *log.Logger) *Topics {
+	s := &Topics{
 		topics: make(map[string]*Topic),
 		logger: l,
 	}
 	return s
 }
 
-func (s *system) Open() error {
+func (s *Topics) Open() error {
 	return nil
 }
 
-func (s *system) Close() error {
+func (s *Topics) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for topic, t := range s.topics {
@@ -43,14 +43,14 @@ func (s *system) Close() error {
 	return nil
 }
 
-func (s *system) Topic(id string) (*Topic, bool) {
+func (s *Topics) Topic(id string) (*Topic, bool) {
 	s.mu.RLock()
 	t, ok := s.topics[id]
 	s.mu.RUnlock()
 	return t, ok
 }
 
-func (s *system) EventState(topic, event string) (EventState, bool) {
+func (s *Topics) EventState(topic, event string) (EventState, bool) {
 	s.mu.RLock()
 	t, ok := s.topics[topic]
 	s.mu.RUnlock()
@@ -60,7 +60,7 @@ func (s *system) EventState(topic, event string) (EventState, bool) {
 	return t.EventState(event)
 }
 
-func (s *system) Collect(event Event) error {
+func (s *Topics) Collect(event Event) error {
 	s.mu.RLock()
 	topic := s.topics[event.Topic]
 	s.mu.RUnlock()
@@ -80,7 +80,7 @@ func (s *system) Collect(event Event) error {
 	return topic.handleEvent(event)
 }
 
-func (s *system) DeleteTopic(topic string) {
+func (s *Topics) DeleteTopic(topic string) {
 	s.mu.Lock()
 	t := s.topics[topic]
 	delete(s.topics, topic)
@@ -90,7 +90,7 @@ func (s *system) DeleteTopic(topic string) {
 	}
 }
 
-func (s *system) RegisterHandler(topics []string, h Handler) {
+func (s *Topics) RegisterHandler(topics []string, h Handler) {
 	if len(topics) == 0 || h == nil {
 		return
 	}
@@ -106,7 +106,7 @@ func (s *system) RegisterHandler(topics []string, h Handler) {
 	}
 }
 
-func (s *system) DeregisterHandler(topics []string, h Handler) {
+func (s *Topics) DeregisterHandler(topics []string, h Handler) {
 	if len(topics) == 0 || h == nil {
 		return
 	}
@@ -119,9 +119,25 @@ func (s *system) DeregisterHandler(topics []string, h Handler) {
 	}
 }
 
+func (s *Topics) ReplaceHandler(oldTopics, newTopics []string, oldH, newH Handler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, topic := range oldTopics {
+		s.topics[topic].removeHandler(oldH)
+	}
+
+	for _, topic := range newTopics {
+		if _, ok := s.topics[topic]; !ok {
+			s.topics[topic] = newTopic(topic)
+		}
+		s.topics[topic].addHandler(newH)
+	}
+}
+
 // TopicStatus returns the max alert level for each topic matching 'pattern', not returning
 // any topics with max alert levels less severe than 'minLevel'
-func (s *system) TopicStatus(pattern string, minLevel Level) map[string]Level {
+func (s *Topics) TopicStatus(pattern string, minLevel Level) map[string]Level {
 	s.mu.RLock()
 	res := make(map[string]Level, len(s.topics))
 	for _, topic := range s.topics {
@@ -139,7 +155,7 @@ func (s *system) TopicStatus(pattern string, minLevel Level) map[string]Level {
 
 // TopicStatusDetails is similar to TopicStatus, but will additionally return
 // at least 'minLevel' severity
-func (s *system) TopicStatusEvents(pattern string, minLevel Level) map[string]map[string]EventState {
+func (s *Topics) TopicStatusEvents(pattern string, minLevel Level) map[string]map[string]EventState {
 	s.mu.RLock()
 	topics := make([]*Topic, 0, len(s.topics))
 	for _, topic := range s.topics {
@@ -174,7 +190,7 @@ type Topic struct {
 	events map[string]*EventState
 	sorted []*EventState
 
-	handlers []*handler
+	handlers []*bufHandler
 }
 
 func newTopic(id string) *Topic {
@@ -309,16 +325,16 @@ func (e sortedStates) Less(i int, j int) bool {
 	return e[i].ID < e[j].ID
 }
 
-// handler wraps a Handler implementation in order to provide buffering and non-blocking event handling.
-type handler struct {
+// bufHandler wraps a Handler implementation in order to provide buffering and non-blocking event handling.
+type bufHandler struct {
 	h        Handler
 	events   chan Event
 	aborting chan struct{}
 	wg       sync.WaitGroup
 }
 
-func newHandler(h Handler) *handler {
-	hdlr := &handler{
+func newHandler(h Handler) *bufHandler {
+	hdlr := &bufHandler{
 		h:        h,
 		events:   make(chan Event, eventBufferSize),
 		aborting: make(chan struct{}),
@@ -331,7 +347,7 @@ func newHandler(h Handler) *handler {
 	return hdlr
 }
 
-func (h *handler) Equal(o Handler) (b bool) {
+func (h *bufHandler) Equal(o Handler) (b bool) {
 	defer func() {
 		// Recover in case the interface concrete type is not a comparable type.
 		r := recover()
@@ -343,17 +359,17 @@ func (h *handler) Equal(o Handler) (b bool) {
 	return
 }
 
-func (h *handler) Close() {
+func (h *bufHandler) Close() {
 	close(h.events)
 	h.wg.Wait()
 }
 
-func (h *handler) Abort() {
+func (h *bufHandler) Abort() {
 	close(h.aborting)
 	h.wg.Wait()
 }
 
-func (h *handler) Handle(event Event) error {
+func (h *bufHandler) Handle(event Event) error {
 	select {
 	case h.events <- event:
 		return nil
@@ -362,7 +378,7 @@ func (h *handler) Handle(event Event) error {
 	}
 }
 
-func (h *handler) run() {
+func (h *bufHandler) run() {
 	for {
 		select {
 		case event, ok := <-h.events:

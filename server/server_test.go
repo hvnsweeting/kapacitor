@@ -6599,3 +6599,232 @@ func TestServer_DoServiceTest(t *testing.T) {
 		}
 	}
 }
+
+func TestServer_AlertHandlers(t *testing.T) {
+	testCases := []struct {
+		create    client.CreateHandlerOptions
+		expCreate client.Handler
+		patch     client.JSONPatch
+		expPatch  client.Handler
+		put       client.ReplaceHandlerOptions
+		expPut    client.Handler
+	}{
+		{
+			create: client.CreateHandlerOptions{
+				ID:     "myhandler",
+				Topics: []string{"system", "test"},
+				Actions: []client.HandlerAction{{
+					Kind: "slack",
+					Options: map[string]interface{}{
+						"channel": "#test",
+					},
+				}},
+			},
+			expCreate: client.Handler{
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/myhandler"},
+				ID:     "myhandler",
+				Topics: []string{"system", "test"},
+				Actions: []client.HandlerAction{{
+					Kind: "slack",
+					Options: map[string]interface{}{
+						"channel": "#test",
+					},
+				}},
+			},
+			patch: client.JSONPatch{
+				{
+					Path:      "/topics/0",
+					Operation: "remove",
+				},
+				{
+					Path:      "/actions/0/options/channel",
+					Operation: "replace",
+					Value:     "#kapacitor_test",
+				},
+			},
+			expPatch: client.Handler{
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/myhandler"},
+				ID:     "myhandler",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{{
+					Kind: "slack",
+					Options: map[string]interface{}{
+						"channel": "#kapacitor_test",
+					},
+				}},
+			},
+			put: client.ReplaceHandlerOptions{
+				ID:     "newid",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{{
+					Kind: "smtp",
+					Options: map[string]interface{}{
+						"to": "oncall@example.com",
+					},
+				}},
+			},
+			expPut: client.Handler{
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/newid"},
+				ID:     "newid",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{{
+					Kind: "smtp",
+					Options: map[string]interface{}{
+						"to": "oncall@example.com",
+					},
+				}},
+			},
+		},
+		{
+			create: client.CreateHandlerOptions{
+				ID:     "anotherhandler",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{
+					{
+						Kind: "slack",
+						Options: map[string]interface{}{
+							"channel": "#test",
+						},
+					},
+					{
+						Kind: "log",
+						Options: map[string]interface{}{
+							"path": "/tmp/alert.log",
+						},
+					},
+				},
+			},
+			expCreate: client.Handler{
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/anotherhandler"},
+				ID:     "anotherhandler",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{
+					{
+						Kind: "slack",
+						Options: map[string]interface{}{
+							"channel": "#test",
+						},
+					},
+					{
+						Kind: "log",
+						Options: map[string]interface{}{
+							"path": "/tmp/alert.log",
+						},
+					},
+				},
+			},
+			patch: client.JSONPatch{
+				{
+					Path:      "/topics/-",
+					Operation: "add",
+					Value:     "system",
+				},
+				{
+					Path:      "/actions/0/options/channel",
+					Operation: "replace",
+					Value:     "#kapacitor_test",
+				},
+				{
+					Path:      "/actions/-",
+					Operation: "add",
+					Value: map[string]interface{}{
+						"kind": "smtp",
+						"options": map[string]interface{}{
+							"to": "oncall@example.com",
+						},
+					},
+				},
+			},
+			expPatch: client.Handler{
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/anotherhandler"},
+				ID:     "anotherhandler",
+				Topics: []string{"test", "system"},
+				Actions: []client.HandlerAction{
+					{
+						Kind: "slack",
+						Options: map[string]interface{}{
+							"channel": "#kapacitor_test",
+						},
+					},
+					{
+						Kind: "log",
+						Options: map[string]interface{}{
+							"path": "/tmp/alert.log",
+						},
+					},
+					{
+						Kind: "smtp",
+						Options: map[string]interface{}{
+							"to": "oncall@example.com",
+						},
+					},
+				},
+			},
+			put: client.ReplaceHandlerOptions{
+				ID:     "anotherhandler",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{{
+					Kind: "smtp",
+					Options: map[string]interface{}{
+						"to": "oncall@example.com",
+					},
+				}},
+			},
+			expPut: client.Handler{
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/anotherhandler"},
+				ID:     "anotherhandler",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{{
+					Kind: "smtp",
+					Options: map[string]interface{}{
+						"to": "oncall@example.com",
+					},
+				}},
+			},
+		},
+	}
+	for _, tc := range testCases {
+		// Create default config
+		c := NewConfig()
+		s := OpenServer(c)
+		cli := Client(s)
+		defer s.Close()
+
+		h, err := cli.CreateHandler(tc.create)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !reflect.DeepEqual(h, tc.expCreate) {
+			t.Errorf("unexpected handler created:\ngot\n%#v\nexp\n%#v\n", h, tc.expCreate)
+		}
+
+		h, err = cli.PatchHandler(h.Link, tc.patch)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !reflect.DeepEqual(h, tc.expPatch) {
+			t.Errorf("unexpected handler patched:\ngot\n%#v\nexp\n%#v\n", h, tc.expPatch)
+		}
+
+		h, err = cli.ReplaceHandler(h.Link, tc.put)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !reflect.DeepEqual(h, tc.expPut) {
+			t.Errorf("unexpected handler put:\ngot\n%#v\nexp\n%#v\n", h, tc.expPut)
+		}
+
+		err = cli.DeleteHandler(h.Link)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = cli.Handler(h.Link)
+		if err == nil {
+			t.Errorf("expected handler to be deleted")
+		}
+	}
+}

@@ -16,8 +16,9 @@ import (
 	"github.com/influxdata/influxdb/influxql"
 	imodels "github.com/influxdata/influxdb/models"
 	"github.com/influxdata/kapacitor"
+	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/clock"
-	"github.com/influxdata/kapacitor/services/alert"
+	alertservice "github.com/influxdata/kapacitor/services/alert"
 	"github.com/influxdata/wlog"
 )
 
@@ -1354,7 +1355,7 @@ batch
 func TestBatch_AlertStateChangesOnly(t *testing.T) {
 	requestCount := int32(0)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ad := kapacitor.AlertData{}
+		ad := alert.AlertData{}
 		dec := json.NewDecoder(r.Body)
 		err := dec.Decode(&ad)
 		if err != nil {
@@ -1362,7 +1363,7 @@ func TestBatch_AlertStateChangesOnly(t *testing.T) {
 		}
 		atomic.AddInt32(&requestCount, 1)
 		if rc := atomic.LoadInt32(&requestCount); rc == 1 {
-			expAd := kapacitor.AlertData{
+			expAd := alert.AlertData{
 				ID:      "cpu_usage_idle:cpu=cpu-total",
 				Message: "cpu_usage_idle:cpu=cpu-total is CRITICAL",
 				Time:    time.Date(1971, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -1373,7 +1374,7 @@ func TestBatch_AlertStateChangesOnly(t *testing.T) {
 				t.Error(msg)
 			}
 		} else {
-			expAd := kapacitor.AlertData{
+			expAd := alert.AlertData{
 				ID:       "cpu_usage_idle:cpu=cpu-total",
 				Message:  "cpu_usage_idle:cpu=cpu-total is OK",
 				Time:     time.Date(1971, 1, 1, 0, 0, 38, 0, time.UTC),
@@ -1419,7 +1420,7 @@ batch
 func TestBatch_AlertStateChangesOnlyExpired(t *testing.T) {
 	requestCount := int32(0)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ad := kapacitor.AlertData{}
+		ad := alert.AlertData{}
 		dec := json.NewDecoder(r.Body)
 		err := dec.Decode(&ad)
 		if err != nil {
@@ -1427,11 +1428,11 @@ func TestBatch_AlertStateChangesOnlyExpired(t *testing.T) {
 		}
 		// We don't care about the data for this test
 		ad.Data = influxql.Result{}
-		var expAd kapacitor.AlertData
+		var expAd alert.AlertData
 		atomic.AddInt32(&requestCount, 1)
 		rc := atomic.LoadInt32(&requestCount)
 		if rc < 3 {
-			expAd = kapacitor.AlertData{
+			expAd = alert.AlertData{
 				ID:       "cpu_usage_idle:cpu=cpu-total",
 				Message:  "cpu_usage_idle:cpu=cpu-total is CRITICAL",
 				Time:     time.Date(1971, 1, 1, 0, 0, int(rc-1)*20, 0, time.UTC),
@@ -1439,7 +1440,7 @@ func TestBatch_AlertStateChangesOnlyExpired(t *testing.T) {
 				Level:    alert.Critical,
 			}
 		} else {
-			expAd = kapacitor.AlertData{
+			expAd = alert.AlertData{
 				ID:       "cpu_usage_idle:cpu=cpu-total",
 				Message:  "cpu_usage_idle:cpu=cpu-total is OK",
 				Time:     time.Date(1971, 1, 1, 0, 0, 38, 0, time.UTC),
@@ -2338,7 +2339,7 @@ func testBatcher(t *testing.T, name, script string) (clock.Setter, *kapacitor.Ex
 	tm.HTTPDService = httpService
 	tm.TaskStore = taskStore{}
 	tm.DeadmanService = deadman{}
-	tm.AlertService = alert.NewService(alert.NewConfig(), logService.NewLogger("[alert] ", log.LstdFlags))
+	tm.AlertService = alertservice.NewService(alertservice.NewConfig(), logService.NewLogger("[alert] ", log.LstdFlags))
 	tm.Open()
 
 	// Create task

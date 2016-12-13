@@ -8,12 +8,12 @@ import (
 	"time"
 
 	imodels "github.com/influxdata/influxdb/models"
+	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/command"
 	"github.com/influxdata/kapacitor/expvar"
 	"github.com/influxdata/kapacitor/influxdb"
 	"github.com/influxdata/kapacitor/models"
 	"github.com/influxdata/kapacitor/pipeline"
-	"github.com/influxdata/kapacitor/services/alert"
 	"github.com/influxdata/kapacitor/services/alerta"
 	"github.com/influxdata/kapacitor/services/hipchat"
 	"github.com/influxdata/kapacitor/services/httpd"

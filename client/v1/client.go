@@ -41,6 +41,8 @@ const (
 	replayQueryPath  = basePath + "/replays/query"
 	configPath       = basePath + "/config"
 	serviceTestsPath = basePath + "/service-tests"
+	alertsPath       = basePath + "/alerts"
+	handlersPath     = alertsPath + "/handlers"
 )
 
 // HTTP configuration for connecting to Kapacitor
@@ -565,6 +567,15 @@ type Replay struct {
 	Status        Status    `json:"status"`
 	Progress      float64   `json:"progress"`
 }
+
+type JSONOperation struct {
+	Path      string      `json:"path"`
+	Operation string      `json:"op"`
+	Value     interface{} `json:"value"`
+	From      string      `json:"from,omitempty"`
+}
+
+type JSONPatch []JSONOperation
 
 func (c *Client) URL() string {
 	return c.url.String()
@@ -1733,32 +1744,160 @@ type Event struct {
 }
 
 type EventState struct {
-	Message  string
-	Details  string
-	Time     time.Time
-	Duration time.Duration
-	Level    string
+	Message  string        `json:"message"`
+	Details  string        `json:"details"`
+	Time     time.Time     `json:"time"`
+	Duration time.Duration `json:"duration"`
+	Level    string        `json:"level"`
 }
 
 type TopicHandlers struct {
-	Link     Link
-	Topics   []string
-	Handlers []Handler
+	Link     Link      `json:"link"`
+	Topic    string    `json:"topic"`
+	Handlers []Handler `json:"handlers"`
 }
 
 type Handlers struct {
-	Link     Link
-	Handlers []Handler
+	Link     Link      `json:"link"`
+	Handlers []Handler `json:"handlers"`
 }
 
 type Handler struct {
-	Link    Link
-	ID      string
-	Topics  []string
-	Actions []HandlerAction
+	Link    Link            `json:"link"`
+	ID      string          `json:"id"`
+	Topics  []string        `json:"topics"`
+	Actions []HandlerAction `json:"actions"`
 }
 
-type HandlerAction map[string]map[string]interface{}
+type HandlerAction struct {
+	Kind    string                 `json:"kind"`
+	Options map[string]interface{} `json:"options"`
+}
+
+// Handler retrieves an alert handler.
+// Errors if no handler exists.
+func (c *Client) Handler(link Link) (Handler, error) {
+	h := Handler{}
+	if link.Href == "" {
+		return h, fmt.Errorf("invalid link %v", link)
+	}
+
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return h, err
+	}
+
+	_, err = c.Do(req, &h, http.StatusOK)
+	return h, err
+}
+
+type CreateHandlerOptions struct {
+	ID      string          `json:"id"`
+	Topics  []string        `json:"topics"`
+	Actions []HandlerAction `json:"actions"`
+}
+
+// CreateHandler creates a new alert handler.
+// Errors if the handler already exists.
+func (c *Client) CreateHandler(opt CreateHandlerOptions) (Handler, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	err := enc.Encode(opt)
+	if err != nil {
+		return Handler{}, err
+	}
+
+	u := *c.url
+	u.Path = handlersPath
+
+	req, err := http.NewRequest("POST", u.String(), &buf)
+	if err != nil {
+		return Handler{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	h := Handler{}
+	_, err = c.Do(req, &h, http.StatusOK)
+	return h, err
+}
+
+// PatchHandler applies a patch operation to an existing handler.
+func (c *Client) PatchHandler(link Link, patch JSONPatch) (Handler, error) {
+	h := Handler{}
+	if link.Href == "" {
+		return h, fmt.Errorf("invalid link %v", link)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	err := enc.Encode(patch)
+	if err != nil {
+		return h, err
+	}
+
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("PATCH", u.String(), &buf)
+	if err != nil {
+		return h, err
+	}
+	req.Header.Set("Content-Type", "application/json+patch")
+
+	_, err = c.Do(req, &h, http.StatusOK)
+	return h, err
+}
+
+type ReplaceHandlerOptions struct {
+	ID      string          `json:"id"`
+	Topics  []string        `json:"topics"`
+	Actions []HandlerAction `json:"actions"`
+}
+
+// ReplaceHandler replaces an existing handler, with the new definition.
+func (c *Client) ReplaceHandler(link Link, opt ReplaceHandlerOptions) (Handler, error) {
+	h := Handler{}
+	if link.Href == "" {
+		return h, fmt.Errorf("invalid link %v", link)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	err := enc.Encode(opt)
+	if err != nil {
+		return h, err
+	}
+
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("PUT", u.String(), &buf)
+	if err != nil {
+		return h, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	_, err = c.Do(req, &h, http.StatusOK)
+	return h, err
+}
+
+// DeleteHandler deletes a handler.
+func (c *Client) DeleteHandler(link Link) error {
+	if link.Href == "" {
+		return fmt.Errorf("invalid link %v", link)
+	}
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("DELETE", u.String(), nil)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.Do(req, nil, http.StatusNoContent)
+	return err
+}
 
 type LogLevelOptions struct {
 	Level string `json:"level"`

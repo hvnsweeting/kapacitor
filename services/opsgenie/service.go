@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/influxdata/kapacitor/services/alert"
+	"github.com/influxdata/kapacitor/alert"
 )
 
 type Service struct {

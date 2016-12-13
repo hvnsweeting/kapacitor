@@ -2,16 +2,22 @@ package alert
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"path"
 	"strings"
 	"sync"
 
+	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/influxdata/kapacitor/alert"
 	client "github.com/influxdata/kapacitor/client/v1"
+	"github.com/influxdata/kapacitor/command"
 	"github.com/influxdata/kapacitor/services/httpd"
+	"github.com/influxdata/kapacitor/services/slack"
+	"github.com/mitchellh/mapstructure"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -23,9 +29,10 @@ const (
 	topicsBasePath         = httpd.BasePath + topicsPath
 	topicsBasePathAnchored = httpd.BasePath + topicsPathAnchored
 
-	handlersPath         = alertsPath + "/handlers"
-	handlersPathAnchored = alertsPath + "/handlers/"
-	handlersBasePath     = httpd.BasePath + handlersPath
+	handlersPath             = alertsPath + "/handlers"
+	handlersPathAnchored     = alertsPath + "/handlers/"
+	handlersBasePath         = httpd.BasePath + handlersPath
+	handlersBasePathAnchored = httpd.BasePath + handlersPathAnchored
 
 	topicEventsPath   = "events"
 	topicHandlersPath = "handlers"
@@ -33,23 +40,40 @@ const (
 	eventsPattern   = "*/" + topicEventsPath
 	eventPattern    = "*/" + topicEventsPath + "/*"
 	handlersPattern = "*/" + topicHandlersPath
-	handlerPattern  = "*/" + topicHandlersPath + "/*"
 
 	eventsRelation   = "events"
 	handlersRelation = "handlers"
 )
 
-type handlerFromOptions interface {
-	HandlerFromOptions(options map[string]interface{}, l *log.Logger) (Handler, error)
+type handler struct {
+	Spec    HandlerSpec
+	Handler alert.Handler
+}
+
+// HandlerSpec provides all the necessary information to create a handler.
+type HandlerSpec struct {
+	ID      string              `json:"id"`
+	Topics  []string            `json:"topics"`
+	Actions []HandlerActionSpec `json:"actions"`
+}
+
+// HandlerActionSpec defines an action an handler can take.
+type HandlerActionSpec struct {
+	Kind    string                 `json:"kind"`
+	Options map[string]interface{} `json:"options"`
+}
+
+type HandlerAction interface {
+	Handle(event alert.Event)
+	SetNext(h alert.Handler)
 }
 
 type Service struct {
 	mu sync.RWMutex
 
-	handlerSpecs map[string]HandlerSpec
-	handlers     map[string]Handler
+	handlers map[string]handler
 
-	system *system
+	topics *alert.Topics
 
 	routes       []httpd.Route
 	HTTPDService interface {
@@ -57,17 +81,20 @@ type Service struct {
 		DelRoutes([]httpd.Route)
 	}
 
-	Slack handlerFromOptions
+	Commander command.Commander
 
 	logger *log.Logger
+
+	SlackService interface {
+		Handler(slack.HandlerConfig, *log.Logger) alert.Handler
+	}
 }
 
 func NewService(c Config, l *log.Logger) *Service {
 	s := &Service{
-		handlerSpecs: make(map[string]HandlerSpec),
-		handlers:     make(map[string]Handler),
-		system:       newSystem(l),
-		logger:       l,
+		handlers: make(map[string]handler),
+		topics:   alert.NewTopics(l),
+		logger:   l,
 	}
 	return s
 }
@@ -89,6 +116,11 @@ func (s *Service) Open() error {
 			HandlerFunc: s.handleRouteTopic,
 		},
 		{
+			Method:      "DELETE",
+			Pattern:     topicsPathAnchored,
+			HandlerFunc: s.handleDeleteTopic,
+		},
+		{
 			Method:      "GET",
 			Pattern:     handlersPath,
 			HandlerFunc: s.handleListHandlers,
@@ -98,11 +130,32 @@ func (s *Service) Open() error {
 			Pattern:     handlersPath,
 			HandlerFunc: s.handleCreateHandler,
 		},
-		//{
-		//	Method:      "GET",
-		//	Pattern:     handlersPathAnchored,
-		//	HandlerFunc: s.handleRouteTopic,
-		//},
+		{
+			// Satisfy CORS checks.
+			Method:      "OPTIONS",
+			Pattern:     handlersPathAnchored,
+			HandlerFunc: httpd.ServeOptions,
+		},
+		{
+			Method:      "PATCH",
+			Pattern:     handlersPathAnchored,
+			HandlerFunc: s.handlePatchHandler,
+		},
+		{
+			Method:      "PUT",
+			Pattern:     handlersPathAnchored,
+			HandlerFunc: s.handlePutHandler,
+		},
+		{
+			Method:      "DELETE",
+			Pattern:     handlersPathAnchored,
+			HandlerFunc: s.handleDeleteHandler,
+		},
+		{
+			Method:      "GET",
+			Pattern:     handlersPathAnchored,
+			HandlerFunc: s.handleGetHandler,
+		},
 	}
 
 	return s.HTTPDService.AddRoutes(s.routes)
@@ -111,7 +164,7 @@ func (s *Service) Open() error {
 func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.system.Close()
+	s.topics.Close()
 	s.HTTPDService.DelRoutes(s.routes)
 	return nil
 }
@@ -128,7 +181,7 @@ func (s *Service) handleListTopics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	minLevelStr := r.URL.Query().Get("min-level")
-	minLevel, err := ParseLevel(minLevelStr)
+	minLevel, err := alert.ParseLevel(minLevelStr)
 	if err != nil {
 		httpd.HttpError(w, err.Error(), true, http.StatusBadRequest)
 		return
@@ -156,10 +209,17 @@ func pathMatch(pattern, p string) (match bool) {
 	return
 }
 
+func (s *Service) handleDeleteTopic(w http.ResponseWriter, r *http.Request) {
+	p := strings.TrimPrefix(r.URL.Path, topicsBasePathAnchored)
+	id := s.topicIDFromPath(p)
+	s.DeleteTopic(id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Service) handleRouteTopic(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, topicsBasePathAnchored)
 	id := s.topicIDFromPath(p)
-	t, ok := s.system.Topic(id)
+	t, ok := s.topics.Topic(id)
 	if !ok {
 		httpd.HttpError(w, fmt.Sprintf("topic %q does not exist", id), true, http.StatusNotFound)
 		return
@@ -172,8 +232,6 @@ func (s *Service) handleRouteTopic(w http.ResponseWriter, r *http.Request) {
 		s.handleTopicEvent(t, w, r)
 	case pathMatch(handlersPattern, p):
 		s.handleListTopicHandlers(t, w, r)
-	case pathMatch(handlerPattern, p):
-		s.handleTopicHandler(t, w, r)
 	default:
 		s.handleTopic(t, w, r)
 	}
@@ -198,7 +256,7 @@ func (s *Service) topicHandlerLink(topic, handler string) client.Link {
 	return client.Link{Relation: client.Self, Href: path.Join(topicsBasePath, topic, topicHandlersPath, handler)}
 }
 
-func (s *Service) createClientTopic(topic string, level Level) client.Topic {
+func (s *Service) createClientTopic(topic string, level alert.Level) client.Topic {
 	return client.Topic{
 		ID:           topic,
 		Link:         s.topicLink(topic),
@@ -208,14 +266,14 @@ func (s *Service) createClientTopic(topic string, level Level) client.Topic {
 	}
 }
 
-func (s *Service) handleTopic(t *Topic, w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleTopic(t *alert.Topic, w http.ResponseWriter, r *http.Request) {
 	topic := s.createClientTopic(t.ID(), t.MaxLevel())
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(httpd.MarshalJSON(topic, true))
 }
 
-func (s *Service) convertEventState(state EventState) client.EventState {
+func (s *Service) convertEventState(state alert.EventState) client.EventState {
 	return client.EventState{
 		Message:  state.Message,
 		Details:  state.Details,
@@ -225,9 +283,26 @@ func (s *Service) convertEventState(state EventState) client.EventState {
 	}
 }
 
-func (s *Service) handleListTopicEvents(t *Topic, w http.ResponseWriter, r *http.Request) {
+func (s *Service) convertHandlerSpec(spec HandlerSpec) client.Handler {
+	actions := make([]client.HandlerAction, 0, len(spec.Actions))
+	for _, actionSpec := range spec.Actions {
+		action := client.HandlerAction{
+			Kind:    actionSpec.Kind,
+			Options: actionSpec.Options,
+		}
+		actions = append(actions, action)
+	}
+	return client.Handler{
+		Link:    s.handlerLink(spec.ID),
+		ID:      spec.ID,
+		Topics:  spec.Topics,
+		Actions: actions,
+	}
+}
+
+func (s *Service) handleListTopicEvents(t *alert.Topic, w http.ResponseWriter, r *http.Request) {
 	minLevelStr := r.URL.Query().Get("min-level")
-	minLevel, err := ParseLevel(minLevelStr)
+	minLevel, err := alert.ParseLevel(minLevelStr)
 	if err != nil {
 		httpd.HttpError(w, err.Error(), true, http.StatusBadRequest)
 		return
@@ -249,7 +324,7 @@ func (s *Service) handleListTopicEvents(t *Topic, w http.ResponseWriter, r *http
 	w.Write(httpd.MarshalJSON(res, true))
 }
 
-func (s *Service) handleTopicEvent(t *Topic, w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleTopicEvent(t *alert.Topic, w http.ResponseWriter, r *http.Request) {
 	id := path.Base(r.URL.Path)
 	state, ok := t.EventState(id)
 	if !ok {
@@ -265,11 +340,28 @@ func (s *Service) handleTopicEvent(t *Topic, w http.ResponseWriter, r *http.Requ
 	w.Write(httpd.MarshalJSON(event, true))
 }
 
-func (s *Service) handleListTopicHandlers(t *Topic, w http.ResponseWriter, r *http.Request) {
-
+func (s *Service) handleListTopicHandlers(t *alert.Topic, w http.ResponseWriter, r *http.Request) {
+	var handlers []client.Handler
+	for _, h := range s.handlers {
+		match := false
+		for _, topic := range h.Spec.Topics {
+			if topic == t.ID() {
+				match = true
+				break
+			}
+		}
+		if match {
+			handlers = append(handlers, s.convertHandlerSpec(h.Spec))
+		}
+	}
+	th := client.TopicHandlers{
+		Link:     s.topicHandlersLink(t.ID(), client.Self),
+		Topic:    t.ID(),
+		Handlers: handlers,
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(th, true))
 }
-
-func (s *Service) handleTopicHandler(t *Topic, w http.ResponseWriter, r *http.Request) {}
 
 func (s *Service) handleListHandlers(w http.ResponseWriter, r *http.Request) {
 	pattern := r.URL.Query().Get("pattern")
@@ -300,35 +392,128 @@ func (s *Service) handleCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h := s.convertHandlerSpec(handlerSpec)
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(h, true))
+}
+
+func (s *Service) handlePatchHandler(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, handlersBasePathAnchored)
+	s.mu.RLock()
+	h, ok := s.handlers[id]
+	s.mu.RUnlock()
+	if !ok {
+		httpd.HttpError(w, fmt.Sprintf("unknown handler: %q", id), true, http.StatusNotFound)
+		return
+	}
+
+	patchBytes, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to read request body: ", err.Error()), true, http.StatusInternalServerError)
+		return
+	}
+	patch, err := jsonpatch.DecodePatch(patchBytes)
+	if err != nil {
+		httpd.HttpError(w, fmt.Sprint("invalid patch json: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
+	specBytes, err := json.Marshal(h.Spec)
+	if err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to marshal JSON: ", err.Error()), true, http.StatusInternalServerError)
+		return
+	}
+	newBytes, err := patch.Apply(specBytes)
+	if err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to apply patch: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
+	newSpec := HandlerSpec{}
+	if err := json.Unmarshal(newBytes, &newSpec); err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to unmarshal patched json: ", err.Error()), true, http.StatusInternalServerError)
+		return
+	}
+
+	s.ReplaceHandlerSpec(h.Spec, newSpec)
+
+	ch := s.convertHandlerSpec(newSpec)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(ch, true))
+}
+
+func (s *Service) handlePutHandler(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, handlersBasePathAnchored)
+	s.mu.RLock()
+	h, ok := s.handlers[id]
+	s.mu.RUnlock()
+	if !ok {
+		httpd.HttpError(w, fmt.Sprintf("unknown handler: %q", id), true, http.StatusNotFound)
+		return
+	}
+
+	newSpec := HandlerSpec{}
+	err := json.NewDecoder(r.Body).Decode(&newSpec)
+	if err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to unmar JSON: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
+
+	s.ReplaceHandlerSpec(h.Spec, newSpec)
+
+	ch := s.convertHandlerSpec(newSpec)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(ch, true))
+}
+
+func (s *Service) handleDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, handlersBasePathAnchored)
+	s.DeregisterHandlerSpec(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Service) EventState(topic, event string) (EventState, bool) {
-	t, ok := s.system.Topic(topic)
+func (s *Service) handleGetHandler(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, handlersBasePathAnchored)
+	s.mu.RLock()
+	h, ok := s.handlers[id]
+	s.mu.RUnlock()
 	if !ok {
-		return EventState{}, false
+		httpd.HttpError(w, fmt.Sprintf("unknown handler: %q", id), true, http.StatusNotFound)
+		return
+	}
+
+	ch := s.convertHandlerSpec(h.Spec)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(httpd.MarshalJSON(ch, true))
+}
+
+func (s *Service) EventState(topic, event string) (alert.EventState, bool) {
+	t, ok := s.topics.Topic(topic)
+	if !ok {
+		return alert.EventState{}, false
 	}
 	return t.EventState(event)
 }
 
-func (s *Service) Collect(event Event) error {
-	return s.system.Collect(event)
+func (s *Service) Collect(event alert.Event) error {
+	return s.topics.Collect(event)
 }
 
 func (s *Service) DeleteTopic(topic string) {
-	s.system.DeleteTopic(topic)
+	s.topics.DeleteTopic(topic)
 }
 
-func (s *Service) RegisterHandler(topics []string, h Handler) {
-	s.system.RegisterHandler(topics, h)
+func (s *Service) RegisterHandler(topics []string, h alert.Handler) {
+	s.topics.RegisterHandler(topics, h)
 }
-func (s *Service) DeregisterHandler(topics []string, h Handler) {
-	s.system.DeregisterHandler(topics, h)
+func (s *Service) DeregisterHandler(topics []string, h alert.Handler) {
+	s.topics.DeregisterHandler(topics, h)
 }
 
 func (s *Service) RegisterHandlerSpec(spec HandlerSpec) error {
 	s.mu.RLock()
-	_, ok := s.handlerSpecs[spec.ID]
+	_, ok := s.handlers[spec.ID]
 	s.mu.RUnlock()
 	if ok {
 		return fmt.Errorf("cannot register handler, handler with ID %q already exists", spec.ID)
@@ -339,30 +524,44 @@ func (s *Service) RegisterHandlerSpec(spec HandlerSpec) error {
 	}
 
 	s.mu.Lock()
-	s.handlerSpecs[spec.ID] = spec
 	s.handlers[spec.ID] = h
 	s.mu.Unlock()
 
-	s.system.RegisterHandler(spec.Topics, h)
+	s.topics.RegisterHandler(spec.Topics, h.Handler)
 	return nil
 }
 
-func (s *Service) DeregisterHandlerSpec(spec HandlerSpec) {
+func (s *Service) DeregisterHandlerSpec(id string) {
 	s.mu.Lock()
-	h := s.handlers[spec.ID]
-	delete(s.handlerSpecs, spec.ID)
-	delete(s.handlers, spec.ID)
+	h, ok := s.handlers[id]
+	delete(s.handlers, id)
 	s.mu.Unlock()
 
-	if h != nil {
-		s.system.DeregisterHandler(spec.Topics, h)
+	if ok {
+		s.topics.DeregisterHandler(h.Spec.Topics, h.Handler)
 	}
+}
+
+func (s *Service) ReplaceHandlerSpec(oldSpec, newSpec HandlerSpec) error {
+	newH, err := s.createHandlerFromSpec(newSpec)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	oldH := s.handlers[oldSpec.ID]
+	delete(s.handlers, oldSpec.ID)
+	s.handlers[newSpec.ID] = newH
+	s.mu.Unlock()
+
+	s.topics.ReplaceHandler(oldSpec.Topics, newSpec.Topics, oldH.Handler, newH.Handler)
+	return nil
 }
 
 // TopicStatus returns the max alert level for each topic matching 'pattern', not returning
 // any topics with max alert levels less severe than 'minLevel'
-func (s *Service) TopicStatus(pattern string, minLevel Level) []client.Topic {
-	statuses := s.system.TopicStatus(pattern, minLevel)
+func (s *Service) TopicStatus(pattern string, minLevel alert.Level) []client.Topic {
+	statuses := s.topics.TopicStatus(pattern, minLevel)
 	topics := make([]client.Topic, 0, len(statuses))
 	for topic, level := range statuses {
 		topics = append(topics, s.createClientTopic(topic, level))
@@ -372,35 +571,33 @@ func (s *Service) TopicStatus(pattern string, minLevel Level) []client.Topic {
 
 // TopicStatusDetails is similar to TopicStatus, but will additionally return
 // at least 'minLevel' severity
-func (s *Service) TopicStatusEvents(pattern string, minLevel Level) map[string]map[string]EventState {
-	return s.system.TopicStatusEvents(pattern, minLevel)
+func (s *Service) TopicStatusEvents(pattern string, minLevel alert.Level) map[string]map[string]alert.EventState {
+	return s.topics.TopicStatusEvents(pattern, minLevel)
 }
 
 func (s *Service) Handlers(pattern string) []client.Handler {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	handlers := make([]client.Handler, 0, len(s.handlerSpecs))
-	for id, spec := range s.handlerSpecs {
-		actions := make([]client.HandlerAction, 0, len(spec.Actions))
-		for _, actionSpec := range spec.Actions {
-			action := make(client.HandlerAction, 1)
-			action[actionSpec.Kind] = actionSpec.Options
-			actions = append(actions, action)
+	handlers := make([]client.Handler, 0, len(s.handlers))
+	for id, h := range s.handlers {
+		if match(pattern, id) {
+			handlers = append(handlers, s.convertHandlerSpec(h.Spec))
 		}
-		handlers = append(handlers, client.Handler{
-			Link:    s.handlerLink(id),
-			ID:      id,
-			Topics:  spec.Topics,
-			Actions: actions,
-		})
 	}
 	return handlers
 }
+func match(pattern, id string) bool {
+	if pattern == "" {
+		return true
+	}
+	matched, _ := path.Match(pattern, id)
+	return matched
+}
 
-func (s *Service) createHandlerFromSpec(spec HandlerSpec) (Handler, error) {
+func (s *Service) createHandlerFromSpec(spec HandlerSpec) (handler, error) {
 	if 0 == len(spec.Actions) {
-		return nil, errors.New("invalid handler spec, must have at least one action")
+		return handler{}, errors.New("invalid handler spec, must have at least one action")
 	}
 
 	// Create actions chained together in a singly linked list
@@ -408,7 +605,7 @@ func (s *Service) createHandlerFromSpec(spec HandlerSpec) (Handler, error) {
 	for _, actionSpec := range spec.Actions {
 		curr, err := s.createHandlerActionFromSpec(actionSpec)
 		if err != nil {
-			return nil, err
+			return handler{}, err
 		}
 		if first == nil {
 			// Keep first action
@@ -424,17 +621,67 @@ func (s *Service) createHandlerFromSpec(spec HandlerSpec) (Handler, error) {
 	// set a noopHandler for the last action
 	prev.SetNext(noopHandler{})
 
-	return first, nil
+	return handler{Spec: spec, Handler: first}, nil
+}
+
+func decodeOptions(options map[string]interface{}, c interface{}) error {
+	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		ErrorUnused: true,
+		Result:      c,
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize mapstructure decoder")
+	}
+	if err := dec.Decode(options); err != nil {
+		return errors.Wrapf(err, "failed to decode options into %T", c)
+	}
+	return nil
 }
 
 func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha HandlerAction, err error) {
-	var h Handler
 	switch spec.Kind {
 	case "slack":
-		h, err = s.Slack.HandlerFromOptions(spec.Options, s.logger)
+		c := slack.HandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := s.SlackService.Handler(c, s.logger)
 		ha = newPassThroughHandler(h)
-	//case "smtp":
-	//	h = newPassThroughHandler(s.SMTPService.Handler(spec.Options,s.logger))
+	case "log":
+		c := alert.LogHandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := alert.NewLogHandler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "exec":
+		c := alert.ExecHandlerConfig{
+			Commander: s.Commander,
+		}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := alert.NewExecHandler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "tcp":
+		c := alert.TCPHandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := alert.NewTCPHandler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "post":
+		c := alert.PostHandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := alert.NewPostHandler(c, s.logger)
+		ha = newPassThroughHandler(h)
 	default:
 		err = fmt.Errorf("unsupported action kind %q", spec.Kind)
 	}
@@ -443,26 +690,26 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 
 // PassThroughHandler implements HandlerAction and passes through all events to the next handler.
 type passThroughHandler struct {
-	h    Handler
-	next Handler
+	h    alert.Handler
+	next alert.Handler
 }
 
-func newPassThroughHandler(h Handler) *passThroughHandler {
+func newPassThroughHandler(h alert.Handler) *passThroughHandler {
 	return &passThroughHandler{
 		h: h,
 	}
 }
 
-func (h *passThroughHandler) Handle(event Event) {
+func (h *passThroughHandler) Handle(event alert.Event) {
 	h.h.Handle(event)
 	h.next.Handle(event)
 }
 
-func (h *passThroughHandler) SetNext(next Handler) {
+func (h *passThroughHandler) SetNext(next alert.Handler) {
 	h.next = next
 }
 
 // NoopHandler implements Handler and does nothing with the event
 type noopHandler struct{}
 
-func (h noopHandler) Handle(event Event) {}
+func (h noopHandler) Handle(event alert.Event) {}

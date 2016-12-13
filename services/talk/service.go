@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/influxdata/kapacitor/services/alert"
+	"github.com/influxdata/kapacitor/alert"
 )
 
 type Service struct {

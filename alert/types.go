@@ -35,24 +35,6 @@ type Handler interface {
 	Handle(event Event)
 }
 
-// HandlerSpec provides all the necessary information to create a handler.
-type HandlerSpec struct {
-	ID      string
-	Topics  []string
-	Actions []HandlerActionSpec
-}
-
-// HandlerActionSpec defines an action an handler can take.
-type HandlerActionSpec struct {
-	Kind    string
-	Options map[string]interface{}
-}
-
-type HandlerAction interface {
-	Handle(event Event)
-	SetNext(h Handler)
-}
-
 type EventState struct {
 	ID       string
 	Message  string

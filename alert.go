@@ -6,8 +6,6 @@ import (
 	"fmt"
 	html "html/template"
 	"log"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,11 +14,10 @@ import (
 
 	"github.com/influxdata/influxdb/influxql"
 	imodels "github.com/influxdata/influxdb/models"
-	"github.com/influxdata/kapacitor/command"
+	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/expvar"
 	"github.com/influxdata/kapacitor/models"
 	"github.com/influxdata/kapacitor/pipeline"
-	"github.com/influxdata/kapacitor/services/alert"
 	"github.com/influxdata/kapacitor/services/alerta"
 	"github.com/influxdata/kapacitor/services/hipchat"
 	"github.com/influxdata/kapacitor/services/opsgenie"
@@ -124,12 +121,18 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 
 	// Construct alert handlers
 	for _, post := range n.PostHandlers {
-		h := an.postHandler(post)
+		c := alert.PostHandlerConfig{
+			URL: post.URL,
+		}
+		h := alert.NewPostHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 
 	for _, tcp := range n.TcpHandlers {
-		h := an.tcpHandler(tcp)
+		c := alert.TCPHandlerConfig{
+			Addr: tcp.Address,
+		}
+		h := alert.NewTCPHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 
@@ -153,7 +156,12 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 	}
 
 	for _, e := range n.ExecHandlers {
-		h := an.execHandler(e)
+		c := alert.ExecHandlerConfig{
+			Prog:      e.Command[0],
+			Args:      e.Command[1:],
+			Commander: et.tm.Commander,
+		}
+		h := alert.NewExecHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 
@@ -161,7 +169,11 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 		if !filepath.IsAbs(log.FilePath) {
 			return nil, fmt.Errorf("alert log path must be absolute: %s is not absolute", log.FilePath)
 		}
-		h := an.logHandler(log)
+		c := alert.LogHandlerConfig{
+			Path: log.FilePath,
+			Mode: os.FileMode(log.Mode),
+		}
+		h := alert.NewLogHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 
@@ -941,187 +953,4 @@ func (a *AlertNode) renderMessageAndDetails(id, name string, t time.Time, group 
 
 	details := tmpBuffer.String()
 	return msg, details, nil
-}
-
-//--------------------------------
-// Alert handlers
-
-// AlertData is a structure that contains relevant data about an alert event.
-// The structure is intended to be JSON encoded, providing a consistent data format.
-type AlertData struct {
-	ID       string          `json:"id"`
-	Message  string          `json:"message"`
-	Details  string          `json:"details"`
-	Time     time.Time       `json:"time"`
-	Duration time.Duration   `json:"duration"`
-	Level    alert.Level     `json:"level"`
-	Data     influxql.Result `json:"data"`
-}
-
-func alertDataFromEvent(event alert.Event) AlertData {
-	return AlertData{
-		ID:       event.State.ID,
-		Message:  event.State.Message,
-		Details:  event.State.Details,
-		Time:     event.State.Time,
-		Duration: event.State.Duration,
-		Level:    event.State.Level,
-		Data:     event.Data.Result,
-	}
-}
-
-type postHandler struct {
-	bufPool *sync.Pool
-	url     string
-	logger  *log.Logger
-}
-
-func (a *AlertNode) postHandler(post *pipeline.PostHandler) alert.Handler {
-	return &postHandler{
-		bufPool: &a.bufPool,
-		url:     post.URL,
-		logger:  a.logger,
-	}
-}
-
-func (h *postHandler) Handle(event alert.Event) {
-	body := h.bufPool.Get().(*bytes.Buffer)
-	defer func() {
-		body.Reset()
-		h.bufPool.Put(body)
-	}()
-	ad := alertDataFromEvent(event)
-
-	err := json.NewEncoder(body).Encode(ad)
-	if err != nil {
-		h.logger.Printf("E! failed to marshal alert data json: %v", err)
-		return
-	}
-
-	resp, err := http.Post(h.url, "application/json", body)
-	if err != nil {
-		h.logger.Printf("E! failed to POST alert data: %v", err)
-		return
-	}
-	resp.Body.Close()
-}
-
-type tcpHandler struct {
-	bufPool *sync.Pool
-	addr    string
-	logger  *log.Logger
-}
-
-func (a *AlertNode) tcpHandler(tcp *pipeline.TcpHandler) alert.Handler {
-	return &tcpHandler{
-		bufPool: &a.bufPool,
-		addr:    tcp.Address,
-		logger:  a.logger,
-	}
-}
-
-func (h *tcpHandler) Handle(event alert.Event) {
-	buf := h.bufPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		h.bufPool.Put(buf)
-	}()
-	ad := alertDataFromEvent(event)
-
-	err := json.NewEncoder(buf).Encode(ad)
-	if err != nil {
-		h.logger.Printf("E! failed to marshal alert data json: %v", err)
-		return
-	}
-
-	conn, err := net.Dial("tcp", h.addr)
-	if err != nil {
-		h.logger.Printf("E! failed to connect to %s: %v", h.addr, err)
-		return
-	}
-	defer conn.Close()
-
-	buf.WriteByte('\n')
-	conn.Write(buf.Bytes())
-}
-
-type execHandler struct {
-	bufPool   *sync.Pool
-	ci        command.CommandInfo
-	commander command.Commander
-	logger    *log.Logger
-}
-
-func (a *AlertNode) execHandler(e *pipeline.ExecHandler) alert.Handler {
-	ci := command.CommandInfo{
-		Prog: e.Command[0],
-		Args: e.Command[1:],
-	}
-	return &execHandler{
-		bufPool:   &a.bufPool,
-		ci:        ci,
-		commander: a.et.tm.Commander,
-		logger:    a.logger,
-	}
-}
-
-func (h *execHandler) Handle(event alert.Event) {
-	buf := h.bufPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		h.bufPool.Put(buf)
-	}()
-	ad := alertDataFromEvent(event)
-
-	err := json.NewEncoder(buf).Encode(ad)
-	if err != nil {
-		h.logger.Printf("E! failed to marshal alert data json: %v", err)
-		return
-	}
-
-	cmd := h.commander.NewCommand(h.ci)
-	cmd.Stdin(buf)
-	var out bytes.Buffer
-	cmd.Stdout(&out)
-	cmd.Stderr(&out)
-	err = cmd.Start()
-	if err != nil {
-		h.logger.Printf("E! exec command failed: Output: %s: %v", out.String(), err)
-		return
-	}
-	err = cmd.Wait()
-	if err != nil {
-		h.logger.Printf("E! exec command failed: Output: %s: %v", out.String(), err)
-		return
-	}
-}
-
-type logHandler struct {
-	logpath string
-	mode    os.FileMode
-	logger  *log.Logger
-}
-
-func (a *AlertNode) logHandler(l *pipeline.LogHandler) alert.Handler {
-	return &logHandler{
-		logpath: l.FilePath,
-		mode:    os.FileMode(l.Mode),
-		logger:  a.logger,
-	}
-}
-
-func (h *logHandler) Handle(event alert.Event) {
-	ad := alertDataFromEvent(event)
-
-	f, err := os.OpenFile(h.logpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(h.mode))
-	if err != nil {
-		h.logger.Printf("E! failed to open file %s for alert logging: %v", h.logpath, err)
-		return
-	}
-	defer f.Close()
-
-	err = json.NewEncoder(f).Encode(ad)
-	if err != nil {
-		h.logger.Printf("E! failed to marshal alert data json: %v", err)
-	}
 }

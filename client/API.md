@@ -1416,6 +1416,7 @@ GET /kapacitor/v1/alerts/topics?min-level=WARNING
 ### Topic Status
 
 To query the status of a topic make a GET request to `/kapacitor/v1/alerts/topics/<topic id>`.
+
 #### Example
 
 ```
@@ -1521,18 +1522,21 @@ GET /kapacitor/v1/alerts/topics/system/handlers
             "link":{"rel":"handler","href":"/kapacitor/v1/alerts/handlers/slack"},
             "id":"slack",
             "topics": ["system", "app"],
-            "actions": [
-                {"slack": {"channel":"#alerts"}}
-            ]
+            "actions": [{
+                "kind":"slack",
+                "options":{
+                    "channel":"#alerts"
+                }
+            }]
         },
         {
             "type" : "identified",
             "link":{"rel":"handler","href":"/kapacitor/v1/alerts/handlers/smtp"},
             "id":"smtp",
             "topics": ["system", "app"],
-            "actions": [
-                {"smtp": {}}
-            ]
+            "actions": [{
+                "kind":"smtp"
+            }]
         }
     ]
 }
@@ -1563,6 +1567,22 @@ GET /kapacitor/v1/alerts/topics/main:alert_cpu:alert5/handlers
 }
 ```
 
+### Creating and Removing Topics
+
+Topics are created dynamically for you when they referenced in TICKscripts or in handlers.
+To delete a topic make a `DELETE` request to `/kapacitor/v1/alerts/topics/<topic id>`.
+This will delete all known events and state for the topic.
+
+>NOTE: Since topics are dynamically created, a topic may return after having deleted it, if a new event is created for the topic.
+
+
+#### Example
+
+```
+DELETE /kapacitor/v1/alerts/topics/system
+```
+
+
 ### List Handlers
 
 To query information about all handlers make a GET request to `/kapacitor/v1/alerts/handlers`.
@@ -1582,18 +1602,21 @@ GET /kapacitor/v1/alerts/handlers
             "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/slack"},
             "id":"slack",
             "topics": ["system", "app"],
-            "actions": [
-                {"slack": {"channel":"#alerts"}}
-            ]
+            "actions": [{
+                "kind":"slack",
+                "options": {
+                    "channel":"#alerts"
+                }
+            }]
         },
         {
             "type" : "identified",
             "link":{"rel":"self","href":"/kapacitor/v1/alerts/handlers/smtp"},
             "id":"smtp",
             "topics": ["system", "app"],
-            "actions": [
-                {"smtp": {}}
-            ]
+            "actions": [{
+                "kind":"smtp"
+            }]
         }
     ]
 }
@@ -1615,9 +1638,12 @@ GET /kapacitor/v1/alerts/handlers/<handler id>
     "link":{"rel":"self","href":"/kapacitor/v1/handlers/slack"},
     "id":"slack",
     "topics": ["system", "app"],
-    "actions": [
-        {"slack": {"channel":"#alerts"}}
-    ]
+    "actions": [{
+        "kind":"slack",
+        "options": {
+            "channel":"#alerts"
+        }
+    }]
 }
 ```
 
@@ -1630,9 +1656,12 @@ POST /kapacitor/v1/alerts/handlers
 {
     "id":"slack",
     "topics": ["system", "app"],
-    "actions": [
-        {"slack": {"channel":"#alerts"}}
-    ]
+    "actions": [{
+        "kind":"slack",
+        "options": {
+            "channel":"#alerts"
+        }
+    }]
 
 }
 ```
@@ -1643,9 +1672,12 @@ POST /kapacitor/v1/alerts/handlers
     "link":{"rel":"self","href":"/kapacitor/v1/handlers/slack"},
     "id": "slack",
     "topics": ["system", "app"],
-    "actions": [
-        {"slack": {"channel":"#alerts"}}
-    ]
+    "actions": [{
+        "kind":"slack",
+        "options": {
+            "channel":"#alerts"
+        }
+    }]
 }
 ```
 
@@ -1665,7 +1697,7 @@ Update the topics and actions for a handler.
 PATCH /kapacitor/v1/alerts/handlers/slack
 [
     {"op":"replace", "path":"/topics", "value":["system", "test"]},
-    {"op":"add", "path":"/actions", "value":{"log":{"path":"/tmp/test.log"}}}
+    {"op":"add", "path":"/actions", "value":{"kind":"log", "options":{"path":"/tmp/test.log"}}}
 ]
 ```
 
@@ -1676,8 +1708,18 @@ PATCH /kapacitor/v1/alerts/handlers/slack
     "id": "slack",
     "topics": ["system", "test"],
     "actions": [
-        {"slack": {"channel":"#alerts"}},
-        {"log": {"path":"/tmp/test.log"}}
+        {
+            "kind":"slack",
+            "options": {
+                "channel":"#alerts"
+            }
+        },
+        {
+            "kind":"log",
+            "options": {
+                "path":"/tmp/test.log"
+            }
+        }
     ]
 }
 ```
@@ -1690,8 +1732,18 @@ PUT /kapacitor/v1/alerts/handlers/slack
     "id": "slack",
     "topics": ["system", "test"],
     "actions": [
-        {"slack": {"channel":"#alerts"}},
-        {"log": {"path":"/tmp/test.log"}}
+        {
+            "kind":"slack",
+            "options": {
+                "channel":"#alerts"
+            }
+        },
+        {
+            "kind":"log",
+            "options": {
+                "path":"/tmp/test.log"
+            }
+        }
     ]
 }
 ```
@@ -1703,8 +1755,18 @@ PUT /kapacitor/v1/alerts/handlers/slack
     "id": "slack",
     "topics": ["system", "test"],
     "actions": [
-        {"slack": {"channel":"#alerts"}},
-        {"log": {"path":"/tmp/test.log"}}
+        {
+            "kind":"slack",
+            "options": {
+                "channel":"#alerts"
+            }
+        },
+        {
+            "kind":"log",
+            "options": {
+                "path":"/tmp/test.log"
+            }
+        }
     ]
 }
 ```

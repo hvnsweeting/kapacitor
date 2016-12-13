@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	text "text/template"
 
-	"github.com/influxdata/kapacitor/services/alert"
+	"github.com/influxdata/kapacitor/alert"
 	"github.com/pkg/errors"
 )
 
