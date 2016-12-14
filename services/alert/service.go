@@ -14,8 +14,15 @@ import (
 	"github.com/influxdata/kapacitor/alert"
 	client "github.com/influxdata/kapacitor/client/v1"
 	"github.com/influxdata/kapacitor/command"
+	"github.com/influxdata/kapacitor/services/alerta"
+	"github.com/influxdata/kapacitor/services/hipchat"
 	"github.com/influxdata/kapacitor/services/httpd"
+	"github.com/influxdata/kapacitor/services/opsgenie"
+	"github.com/influxdata/kapacitor/services/pagerduty"
 	"github.com/influxdata/kapacitor/services/slack"
+	"github.com/influxdata/kapacitor/services/smtp"
+	"github.com/influxdata/kapacitor/services/telegram"
+	"github.com/influxdata/kapacitor/services/victorops"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 )
@@ -85,8 +92,36 @@ type Service struct {
 
 	logger *log.Logger
 
+	AlertaService interface {
+		DefaultHandlerConfig() alerta.HandlerConfig
+		Handler(alerta.HandlerConfig, *log.Logger) (alert.Handler, error)
+	}
+	HipChatService interface {
+		Handler(hipchat.HandlerConfig, *log.Logger) alert.Handler
+	}
+	OpsGenieService interface {
+		Handler(opsgenie.HandlerConfig, *log.Logger) alert.Handler
+	}
+	PagerDutyService interface {
+		Handler(pagerduty.HandlerConfig, *log.Logger) alert.Handler
+	}
+	SensuService interface {
+		Handler(*log.Logger) alert.Handler
+	}
 	SlackService interface {
 		Handler(slack.HandlerConfig, *log.Logger) alert.Handler
+	}
+	SMTPService interface {
+		Handler(smtp.HandlerConfig, *log.Logger) alert.Handler
+	}
+	TalkService interface {
+		Handler(*log.Logger) alert.Handler
+	}
+	TelegramService interface {
+		Handler(telegram.HandlerConfig, *log.Logger) alert.Handler
+	}
+	VictorOpsService interface {
+		Handler(victorops.HandlerConfig, *log.Logger) alert.Handler
 	}
 }
 
@@ -433,7 +468,10 @@ func (s *Service) handlePatchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.ReplaceHandlerSpec(h.Spec, newSpec)
+	if err := s.ReplaceHandlerSpec(h.Spec, newSpec); err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to update handler: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
 
 	ch := s.convertHandlerSpec(newSpec)
 
@@ -458,7 +496,10 @@ func (s *Service) handlePutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.ReplaceHandlerSpec(h.Spec, newSpec)
+	if err := s.ReplaceHandlerSpec(h.Spec, newSpec); err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to update handler: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
 
 	ch := s.convertHandlerSpec(newSpec)
 
@@ -640,6 +681,44 @@ func decodeOptions(options map[string]interface{}, c interface{}) error {
 
 func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha HandlerAction, err error) {
 	switch spec.Kind {
+	case "alerta":
+		c := s.AlertaService.DefaultHandlerConfig()
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h, err := s.AlertaService.Handler(c, s.logger)
+		if err != nil {
+			return nil, err
+		}
+		ha = newPassThroughHandler(h)
+	case "hipchat":
+		c := hipchat.HandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := s.HipChatService.Handler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "opsgenie":
+		c := opsgenie.HandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := s.OpsGenieService.Handler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "pagerduty":
+		c := pagerduty.HandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := s.PagerDutyService.Handler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "sensu":
+		h := s.SensuService.Handler(s.logger)
+		ha = newPassThroughHandler(h)
 	case "slack":
 		c := slack.HandlerConfig{}
 		err = decodeOptions(spec.Options, &c)
@@ -647,6 +726,33 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 			return
 		}
 		h := s.SlackService.Handler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "smtp":
+		c := smtp.HandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := s.SMTPService.Handler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "talk":
+		h := s.TalkService.Handler(s.logger)
+		ha = newPassThroughHandler(h)
+	case "telegram":
+		c := telegram.HandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := s.TelegramService.Handler(c, s.logger)
+		ha = newPassThroughHandler(h)
+	case "victorops":
+		c := victorops.HandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := s.VictorOpsService.Handler(c, s.logger)
 		ha = newPassThroughHandler(h)
 	case "log":
 		c := alert.LogHandlerConfig{}
@@ -684,6 +790,7 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 		ha = newPassThroughHandler(h)
 	default:
 		err = fmt.Errorf("unsupported action kind %q", spec.Kind)
+		log.Println("error", err)
 	}
 	return
 }

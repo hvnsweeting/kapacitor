@@ -174,15 +174,15 @@ func (s *Service) preparePost(channel, message, username, iconEmoji string, leve
 type HandlerConfig struct {
 	// Slack channel in which to post messages.
 	// If empty uses the channel from the configuration.
-	Channel string
+	Channel string `mapstructure:"channel"`
 
 	// Username of the Slack bot.
 	// If empty uses the username from the configuration.
-	Username string
+	Username string `mapstructure:"username"`
 
 	// IconEmoji is an emoji name surrounded in ':' characters.
 	// The emoji image will replace the normal user icon for the slack bot.
-	IconEmoji string
+	IconEmoji string `mapstructure:"icon-emoji"`
 }
 
 type handler struct {

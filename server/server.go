@@ -272,6 +272,8 @@ func (s *Server) appendSMTPService() {
 	srv := smtp.NewService(c, l)
 
 	s.TaskMaster.SMTPService = srv
+	s.AlertService.SMTPService = srv
+
 	s.SetDynamicService("smtp", srv)
 	s.AppendService("smtp", srv)
 }
@@ -384,7 +386,9 @@ func (s *Server) appendOpsGenieService() {
 	c := s.config.OpsGenie
 	l := s.LogService.NewLogger("[opsgenie] ", log.LstdFlags)
 	srv := opsgenie.NewService(c, l)
+
 	s.TaskMaster.OpsGenieService = srv
+	s.AlertService.OpsGenieService = srv
 
 	s.SetDynamicService("opsgenie", srv)
 	s.AppendService("opsgenie", srv)
@@ -394,7 +398,9 @@ func (s *Server) appendVictorOpsService() {
 	c := s.config.VictorOps
 	l := s.LogService.NewLogger("[victorops] ", log.LstdFlags)
 	srv := victorops.NewService(c, l)
+
 	s.TaskMaster.VictorOpsService = srv
+	s.AlertService.VictorOpsService = srv
 
 	s.SetDynamicService("victorops", srv)
 	s.AppendService("victorops", srv)
@@ -405,7 +411,9 @@ func (s *Server) appendPagerDutyService() {
 	l := s.LogService.NewLogger("[pagerduty] ", log.LstdFlags)
 	srv := pagerduty.NewService(c, l)
 	srv.HTTPDService = s.HTTPDService
+
 	s.TaskMaster.PagerDutyService = srv
+	s.AlertService.PagerDutyService = srv
 
 	s.SetDynamicService("pagerduty", srv)
 	s.AppendService("pagerduty", srv)
@@ -415,7 +423,9 @@ func (s *Server) appendSensuService() {
 	c := s.config.Sensu
 	l := s.LogService.NewLogger("[sensu] ", log.LstdFlags)
 	srv := sensu.NewService(c, l)
+
 	s.TaskMaster.SensuService = srv
+	s.AlertService.SensuService = srv
 
 	s.SetDynamicService("sensu", srv)
 	s.AppendService("sensu", srv)
@@ -425,8 +435,8 @@ func (s *Server) appendSlackService() {
 	c := s.config.Slack
 	l := s.LogService.NewLogger("[slack] ", log.LstdFlags)
 	srv := slack.NewService(c, l)
-	s.TaskMaster.SlackService = srv
 
+	s.TaskMaster.SlackService = srv
 	s.AlertService.SlackService = srv
 
 	s.SetDynamicService("slack", srv)
@@ -437,7 +447,9 @@ func (s *Server) appendTelegramService() {
 	c := s.config.Telegram
 	l := s.LogService.NewLogger("[telegram] ", log.LstdFlags)
 	srv := telegram.NewService(c, l)
+
 	s.TaskMaster.TelegramService = srv
+	s.AlertService.TelegramService = srv
 
 	s.SetDynamicService("telegram", srv)
 	s.AppendService("telegram", srv)
@@ -447,7 +459,9 @@ func (s *Server) appendHipChatService() {
 	c := s.config.HipChat
 	l := s.LogService.NewLogger("[hipchat] ", log.LstdFlags)
 	srv := hipchat.NewService(c, l)
+
 	s.TaskMaster.HipChatService = srv
+	s.AlertService.HipChatService = srv
 
 	s.SetDynamicService("hipchat", srv)
 	s.AppendService("hipchat", srv)
@@ -457,7 +471,9 @@ func (s *Server) appendAlertaService() {
 	c := s.config.Alerta
 	l := s.LogService.NewLogger("[alerta] ", log.LstdFlags)
 	srv := alerta.NewService(c, l)
+
 	s.TaskMaster.AlertaService = srv
+	s.AlertService.AlertaService = srv
 
 	s.SetDynamicService("alerta", srv)
 	s.AppendService("alerta", srv)
@@ -467,7 +483,9 @@ func (s *Server) appendTalkService() {
 	c := s.config.Talk
 	l := s.LogService.NewLogger("[talk] ", log.LstdFlags)
 	srv := talk.NewService(c, l)
+
 	s.TaskMaster.TalkService = srv
+	s.AlertService.TalkService = srv
 
 	s.SetDynamicService("talk", srv)
 	s.AppendService("talk", srv)

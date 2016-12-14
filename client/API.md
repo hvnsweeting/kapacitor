@@ -1503,6 +1503,8 @@ GET /kapacitor/v1/alerts/topics/system/events/cpu
 Handlers are created independent of a topic but are associated with a topic.
 You can get a list of handlers configured for a topic by making a GET request to `/kapacitor/v1/alerts/topics/<topic id>/handlers`.
 
+>NOTE: Anonymous handlers (created from TICKscripts) will not be listed under their anonymous topics as they are not configured via the API.
+
 #### Example
 
 
@@ -1542,9 +1544,8 @@ GET /kapacitor/v1/alerts/topics/system/handlers
 }
 ```
 
-Get the handlers for the anonymous topic `main:alert_cpu:alert5`.
-This topic represents an auto-generated topic from a task that has defined handlers explicitly in the TICKscript.
-Anonymous handlers cannot be modified via the API.
+This `main:alert_cpu:alert5` topic represents an auto-generated topic from a task that has defined handlers explicitly in the TICKscript.
+Anonymous handlers cannot be listed or modified via the API.
 
 ```
 GET /kapacitor/v1/alerts/topics/main:alert_cpu:alert5/handlers
@@ -1553,17 +1554,8 @@ GET /kapacitor/v1/alerts/topics/main:alert_cpu:alert5/handlers
 ```
 {
     "link":{"rel":"self","href":"/kapacitor/v1/topics/system/handlers"},
-    "id": "system",
-    "handlers": [
-        {
-            "type" : "anonymous",
-            "kind" : "slack"
-        },
-        {
-            "type" : "anonymous",
-            "kind" : "smtp"
-        }
-    ]
+    "topic": "main:alert_cpu:alert5",
+    "handlers": null
 }
 ```
 

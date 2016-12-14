@@ -164,7 +164,7 @@ func (s *Service) preparePost(routingKey, messageType, message, entityID string,
 type HandlerConfig struct {
 	// The routing key to use for the alert.
 	// Defaults to the value in the configuration if empty.
-	RoutingKey string
+	RoutingKey string `mapstructure:"routing-key"`
 }
 
 type handler struct {

@@ -186,12 +186,10 @@ func (s *Service) preparePost(teams []string, recipients []string, messageType, 
 
 type HandlerConfig struct {
 	// OpsGenie Teams.
-	// tick:ignore
-	TeamsList []string
+	TeamsList []string `mapstructure:"teams-list"`
 
 	// OpsGenie Recipients.
-	// tick:ignore
-	RecipientsList []string
+	RecipientsList []string `mapstructure:"recipients-list"`
 }
 
 type handler struct {

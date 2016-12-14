@@ -17,6 +17,12 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	defaultResource = "{{ .Name }}"
+	defaultEvent    = "{{ .ID }}"
+	defaultGroup    = "{{ .Group }}"
+)
+
 type Service struct {
 	configValue atomic.Value
 	clientValue atomic.Value
@@ -206,40 +212,39 @@ func (s *Service) preparePost(token, resource, event, environment, severity, gro
 type HandlerConfig struct {
 	// Alerta authentication token.
 	// If empty uses the token from the configuration.
-	Token string
+	Token string `mapstructure:"token"`
 
 	// Alerta resource.
 	// Can be a template and has access to the same data as the AlertNode.Details property.
 	// Default: {{ .Name }}
-	Resource string
+	Resource string `mapstructure:"resource"`
 
 	// Alerta event.
 	// Can be a template and has access to the same data as the idInfo property.
 	// Default: {{ .ID }}
-	Event string
+	Event string `mapstructure:"event"`
 
 	// Alerta environment.
 	// Can be a template and has access to the same data as the AlertNode.Details property.
 	// Defaut is set from the configuration.
-	Environment string
+	Environment string `mapstructure:"environment"`
 
 	// Alerta group.
 	// Can be a template and has access to the same data as the AlertNode.Details property.
 	// Default: {{ .Group }}
-	Group string
+	Group string `mapstructure:"group"`
 
 	// Alerta value.
 	// Can be a template and has access to the same data as the AlertNode.Details property.
 	// Default is an empty string.
-	Value string
+	Value string `mapstructure:"value"`
 
 	// Alerta origin.
 	// If empty uses the origin from the configuration.
-	Origin string
+	Origin string `mapstructure:"origin"`
 
 	// List of effected Services
-	// tick:ignore
-	Service []string `tick:"Services"`
+	Service []string `mapstructure:"service"`
 }
 
 type handler struct {
@@ -252,6 +257,14 @@ type handler struct {
 	environmentTmpl *text.Template
 	valueTmpl       *text.Template
 	groupTmpl       *text.Template
+}
+
+func (s *Service) DefaultHandlerConfig() HandlerConfig {
+	return HandlerConfig{
+		Resource: defaultResource,
+		Event:    defaultEvent,
+		Group:    defaultGroup,
+	}
 }
 
 func (s *Service) Handler(c HandlerConfig, l *log.Logger) (alert.Handler, error) {

@@ -10,11 +10,6 @@ import (
 	"sync"
 )
 
-type Message struct {
-	Header mail.Header
-	Body   string
-}
-
 type Server struct {
 	Host string
 	Port int
@@ -88,10 +83,12 @@ func (s *Server) run() {
 	}
 }
 
-const replyGreeting = "220 hello"
-const replyOK = "250 Ok"
-const replyData = "354 Go ahead"
-const replyGoodbye = "221 Goodbye"
+const (
+	replyGreeting = "220 hello"
+	replyOK       = "250 Ok"
+	replyData     = "354 Go ahead"
+	replyGoodbye  = "221 Goodbye"
+)
 
 // handleConn takes a connection and implements a simplified SMTP protocol,
 // while capturing the message contents.
@@ -154,4 +151,33 @@ FAIL:
 	s.mu.Lock()
 	s.errors = append(s.errors, err)
 	s.mu.Unlock()
+}
+
+type Message struct {
+	Header mail.Header
+	Body   string
+}
+
+// Compare returns a useful error message if the two message are note equal.
+// Only headers that are present in the exp message are compared, thus ignoring any extra headers in the got message.
+func (exp *Message) Compare(got *Message) error {
+	if exp.Body != got.Body {
+		return fmt.Errorf("unequal bodies:\ngot\n%q\nexp\n%q\n", got.Body, exp.Body)
+	}
+	// Compare only the header keys specified in the exp message.
+	for k, ev := range exp.Header {
+		gv, ok := got.Header[k]
+		if !ok {
+			return fmt.Errorf("missing header %s", k)
+		}
+		if len(gv) != len(ev) {
+			return fmt.Errorf("unexpected header %s: got %v exp %v", k, gv, ev)
+		}
+		for i := range ev {
+			if gv[i] != ev[i] {
+				return fmt.Errorf("unexpected header %s: got %v exp %v", k, gv, ev)
+			}
+		}
+	}
+	return nil
 }

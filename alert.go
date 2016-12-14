@@ -18,7 +18,6 @@ import (
 	"github.com/influxdata/kapacitor/expvar"
 	"github.com/influxdata/kapacitor/models"
 	"github.com/influxdata/kapacitor/pipeline"
-	"github.com/influxdata/kapacitor/services/alerta"
 	"github.com/influxdata/kapacitor/services/hipchat"
 	"github.com/influxdata/kapacitor/services/opsgenie"
 	"github.com/influxdata/kapacitor/services/pagerduty"
@@ -271,15 +270,30 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 	}
 
 	for _, a := range n.AlertaHandlers {
-		c := alerta.HandlerConfig{
-			Token:       a.Token,
-			Resource:    a.Resource,
-			Event:       a.Event,
-			Environment: a.Environment,
-			Group:       a.Group,
-			Value:       a.Value,
-			Origin:      a.Origin,
-			Service:     a.Service,
+		c := et.tm.AlertaService.DefaultHandlerConfig()
+		if a.Token != "" {
+			c.Token = a.Token
+		}
+		if a.Resource != "" {
+			c.Resource = a.Resource
+		}
+		if a.Event != "" {
+			c.Event = a.Event
+		}
+		if a.Environment != "" {
+			c.Environment = a.Environment
+		}
+		if a.Group != "" {
+			c.Group = a.Group
+		}
+		if a.Value != "" {
+			c.Value = a.Value
+		}
+		if a.Origin != "" {
+			c.Origin = a.Origin
+		}
+		if len(a.Service) != 0 {
+			c.Service = a.Service
 		}
 		h, err := et.tm.AlertaService.Handler(c, l)
 		if err != nil {

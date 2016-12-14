@@ -125,10 +125,15 @@ func (s *Service) runMailer() {
 	d, idleTimeout = s.dialer()
 
 	var conn gomail.SendCloser
+	defer func() {
+		if conn != nil {
+			conn.Close()
+		}
+	}()
+
 	var err error
 	open := false
-	done := false
-	for !done {
+	for {
 		timer := time.NewTimer(idleTimeout)
 		select {
 		case <-s.updates:
@@ -144,8 +149,7 @@ func (s *Service) runMailer() {
 			open = false
 		case m, ok := <-s.mail:
 			if !ok {
-				done = true
-				break
+				return
 			}
 			if !open {
 				if conn, err = d.Dial(); err != nil {
@@ -229,7 +233,7 @@ func (s *Service) Test(options interface{}) error {
 
 type HandlerConfig struct {
 	// List of email recipients.
-	To []string
+	To []string `mapstructure:"to"`
 }
 
 type handler struct {

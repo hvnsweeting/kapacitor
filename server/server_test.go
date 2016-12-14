@@ -1,11 +1,13 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"os"
 	"os/exec"
@@ -25,11 +27,21 @@ import (
 	"github.com/influxdata/influxdb/toml"
 	"github.com/influxdata/kapacitor/client/v1"
 	"github.com/influxdata/kapacitor/server"
+	"github.com/influxdata/kapacitor/services/alerta/alertatest"
+	"github.com/influxdata/kapacitor/services/hipchat/hipchattest"
 	"github.com/influxdata/kapacitor/services/opsgenie"
+	"github.com/influxdata/kapacitor/services/opsgenie/opsgenietest"
 	"github.com/influxdata/kapacitor/services/pagerduty"
+	"github.com/influxdata/kapacitor/services/pagerduty/pagerdutytest"
+	"github.com/influxdata/kapacitor/services/sensu/sensutest"
+	"github.com/influxdata/kapacitor/services/slack/slacktest"
+	"github.com/influxdata/kapacitor/services/smtp/smtptest"
+	"github.com/influxdata/kapacitor/services/talk/talktest"
 	"github.com/influxdata/kapacitor/services/telegram"
+	"github.com/influxdata/kapacitor/services/telegram/telegramtest"
 	"github.com/influxdata/kapacitor/services/udf"
 	"github.com/influxdata/kapacitor/services/victorops"
+	"github.com/influxdata/kapacitor/services/victorops/victoropstest"
 	"github.com/pkg/errors"
 )
 
@@ -6600,7 +6612,7 @@ func TestServer_DoServiceTest(t *testing.T) {
 	}
 }
 
-func TestServer_AlertHandlers(t *testing.T) {
+func TestServer_AlertHandlers_CRUD(t *testing.T) {
 	testCases := []struct {
 		create    client.CreateHandlerOptions
 		expCreate client.Handler
@@ -6659,7 +6671,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 				Actions: []client.HandlerAction{{
 					Kind: "smtp",
 					Options: map[string]interface{}{
-						"to": "oncall@example.com",
+						"to": []string{"oncall@example.com"},
 					},
 				}},
 			},
@@ -6670,7 +6682,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 				Actions: []client.HandlerAction{{
 					Kind: "smtp",
 					Options: map[string]interface{}{
-						"to": "oncall@example.com",
+						"to": []interface{}{"oncall@example.com"},
 					},
 				}},
 			},
@@ -6730,7 +6742,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 					Value: map[string]interface{}{
 						"kind": "smtp",
 						"options": map[string]interface{}{
-							"to": "oncall@example.com",
+							"to": []string{"oncall@example.com"},
 						},
 					},
 				},
@@ -6755,7 +6767,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 					{
 						Kind: "smtp",
 						Options: map[string]interface{}{
-							"to": "oncall@example.com",
+							"to": []interface{}{"oncall@example.com"},
 						},
 					},
 				},
@@ -6766,7 +6778,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 				Actions: []client.HandlerAction{{
 					Kind: "smtp",
 					Options: map[string]interface{}{
-						"to": "oncall@example.com",
+						"to": []string{"oncall@example.com"},
 					},
 				}},
 			},
@@ -6777,7 +6789,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 				Actions: []client.HandlerAction{{
 					Kind: "smtp",
 					Options: map[string]interface{}{
-						"to": "oncall@example.com",
+						"to": []interface{}{"oncall@example.com"},
 					},
 				}},
 			},
@@ -6825,6 +6837,499 @@ func TestServer_AlertHandlers(t *testing.T) {
 		_, err = cli.Handler(h.Link)
 		if err == nil {
 			t.Errorf("expected handler to be deleted")
+		}
+	}
+}
+
+func TestServer_AlertHandlers(t *testing.T) {
+	testCases := []struct {
+		handlerAction client.HandlerAction
+		setup         func(*server.Config) (context.Context, error)
+		result        func(context.Context) error
+	}{
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "alerta",
+				Options: map[string]interface{}{
+					"token":       "testtoken1234567",
+					"origin":      "kapacitor",
+					"group":       "test",
+					"environment": "env",
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := alertatest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.Alerta.Enabled = true
+				c.Alerta.URL = ts.URL
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*alertatest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected alerta message to be sent")
+				}
+				exp := alertatest.Request{
+					URL:           "/alert",
+					Authorization: "Bearer testtoken1234567",
+					PostData: alertatest.PostData{
+						Resource:    "alert",
+						Event:       "id",
+						Group:       "test",
+						Environment: "env",
+						Text:        "message",
+						Origin:      "kapacitor",
+						Service:     []string{"alert"},
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected alerta request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "hipchat",
+				Options: map[string]interface{}{
+					"token": "testtoken1234567",
+					"room":  "1234567",
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := hipchattest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.HipChat.Enabled = true
+				c.HipChat.URL = ts.URL
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*hipchattest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected hipchat message to be sent")
+				}
+				exp := hipchattest.Request{
+					URL: "/1234567/notification?auth_token=testtoken1234567",
+					PostData: hipchattest.PostData{
+						From:    "kapacitor",
+						Message: "message",
+						Color:   "red",
+						Notify:  true,
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected hipchat request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "opsgenie",
+				Options: map[string]interface{}{
+					"teams-list":      []string{"A team", "B team"},
+					"recipients-list": []string{"test_recipient1", "test_recipient2"},
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := opsgenietest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.OpsGenie.Enabled = true
+				c.OpsGenie.URL = ts.URL
+				c.OpsGenie.APIKey = "api_key"
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*opsgenietest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected opsgenie message to be sent")
+				}
+				exp := opsgenietest.Request{
+					URL: "/",
+					PostData: opsgenietest.PostData{
+						ApiKey:  "api_key",
+						Message: "message",
+						Entity:  "id",
+						Alias:   "id",
+						Note:    "",
+						Details: map[string]interface{}{
+							"Level":           "CRITICAL",
+							"Monitoring Tool": "Kapacitor",
+						},
+						Description: `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`,
+						Teams:       []string{"A team", "B team"},
+						Recipients:  []string{"test_recipient1", "test_recipient2"},
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected opsgenie request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "pagerduty",
+				Options: map[string]interface{}{
+					"service-key": "service_key",
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := pagerdutytest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.PagerDuty.Enabled = true
+				c.PagerDuty.URL = ts.URL
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*pagerdutytest.Server)
+				kapacitorURL := ctxt.Value("kapacitorURL").(string)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected pagerduty message to be sent")
+				}
+				exp := pagerdutytest.Request{
+					URL: "/",
+					PostData: pagerdutytest.PostData{
+						ServiceKey:  "service_key",
+						EventType:   "trigger",
+						Description: "message",
+						Client:      "kapacitor",
+						ClientURL:   kapacitorURL,
+						Details:     `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`,
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected pagerduty request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "sensu",
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts, err := sensutest.NewServer(1)
+				if err != nil {
+					return nil, err
+				}
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.Sensu.Enabled = true
+				c.Sensu.Addr = ts.Addr
+				c.Sensu.Source = "Kapacitor"
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*sensutest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected sensu message to be sent")
+				}
+				exp := sensutest.Request{
+					Source: "Kapacitor",
+					Output: "message",
+					Name:   "id",
+					Status: 2,
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected sensu request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "slack",
+				Options: map[string]interface{}{
+					"channel": "#test",
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := slacktest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.Slack.Enabled = true
+				c.Slack.URL = ts.URL + "/test/slack/url"
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*slacktest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected slack message to be sent")
+				}
+				exp := slacktest.Request{
+					URL: "/test/slack/url",
+					PostData: slacktest.PostData{
+						Channel:  "#test",
+						Username: "kapacitor",
+						Text:     "",
+						Attachments: []slacktest.Attachment{
+							{
+								Fallback: "message",
+								Color:    "danger",
+								Text:     "message",
+							},
+						},
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected slack request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "smtp",
+				Options: map[string]interface{}{
+					"to": []string{"oncall@example.com", "backup@example.com"},
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts, err := smtptest.NewServer()
+				if err != nil {
+					return nil, err
+				}
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.SMTP.Enabled = true
+				c.SMTP.Host = ts.Host
+				c.SMTP.Port = ts.Port
+				c.SMTP.From = "test@example.com"
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*smtptest.Server)
+				ts.Close()
+
+				errors := ts.Errors()
+				if len(errors) != 0 {
+					return fmt.Errorf("multiple errors %d: %v", len(errors), errors)
+				}
+
+				expMail := []*smtptest.Message{{
+					Header: mail.Header{
+						"Mime-Version":              []string{"1.0"},
+						"Content-Type":              []string{"text/html; charset=UTF-8"},
+						"Content-Transfer-Encoding": []string{"quoted-printable"},
+						"To":      []string{"oncall@example.com, backup@example.com"},
+						"From":    []string{"test@example.com"},
+						"Subject": []string{"message"},
+					},
+					Body: "details\n",
+				}}
+				msgs := ts.SentMessages()
+				if got, exp := len(msgs), len(expMail); got != exp {
+					return fmt.Errorf("unexpected number of messages sent: got %d exp %d", got, exp)
+				}
+				for i, exp := range expMail {
+					got := msgs[i]
+					if err := exp.Compare(got); err != nil {
+						return fmt.Errorf("unexpected message %d: %v", i, err)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "talk",
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := talktest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.Talk.Enabled = true
+				c.Talk.URL = ts.URL
+				c.Talk.AuthorName = "Kapacitor"
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*talktest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected talk message to be sent")
+				}
+				exp := talktest.Request{
+					URL: "/",
+					PostData: talktest.PostData{
+						AuthorName: "Kapacitor",
+						Text:       "message",
+						Title:      "id",
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected talk request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "telegram",
+				Options: map[string]interface{}{
+					"chat-id":                  "chat id",
+					"disable-web-page-preview": true,
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := telegramtest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.Telegram.Enabled = true
+				c.Telegram.URL = ts.URL + "/bot"
+				c.Telegram.Token = "TOKEN:AUTH"
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*telegramtest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected telegram message to be sent")
+				}
+				exp := telegramtest.Request{
+					URL: "/botTOKEN:AUTH/sendMessage",
+					PostData: telegramtest.PostData{
+						ChatId:                "chat id",
+						Text:                  "message",
+						ParseMode:             "",
+						DisableWebPagePreview: true,
+						DisableNotification:   false,
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected telegram request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "victorops",
+				Options: map[string]interface{}{
+					"routing-key": "key",
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				ts := victoropstest.NewServer(1)
+				ctxt := context.WithValue(nil, "server", ts)
+
+				c.VictorOps.Enabled = true
+				c.VictorOps.URL = ts.URL
+				c.VictorOps.APIKey = "api_key"
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*victoropstest.Server)
+				ts.Close()
+				got, ok := <-ts.Requests
+				if !ok {
+					return errors.New("expected victorops message to be sent")
+				}
+				exp := victoropstest.Request{
+					URL: "/api_key/key",
+					PostData: victoropstest.PostData{
+						MessageType:    "CRITICAL",
+						EntityID:       "id",
+						StateMessage:   "message",
+						Timestamp:      0,
+						MonitoringTool: "kapacitor",
+						Data:           `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`,
+					},
+				}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected victorops request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+	}
+	for _, tc := range testCases {
+		kind := tc.handlerAction.Kind
+		// Create default config
+		c := NewConfig()
+		var ctxt context.Context
+		if tc.setup != nil {
+			var err error
+			ctxt, err = tc.setup(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		s := OpenServer(c)
+		cli := Client(s)
+		closed := false
+		defer func() {
+			if !closed {
+				s.Close()
+			}
+		}()
+		ctxt = context.WithValue(ctxt, "kapacitorURL", s.URL())
+
+		if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+			ID:     "testAlertHandlers",
+			Topics: []string{"test"},
+			Actions: []client.HandlerAction{
+				tc.handlerAction,
+			},
+		}); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+
+		tick := `
+stream
+	|from()
+		.measurement('alert')
+	|alert()
+		.topic('test')
+		.id('id')
+		.message('message')
+		.details('details')
+		.crit(lambda: TRUE)
+`
+
+		if _, err := cli.CreateTask(client.CreateTaskOptions{
+			ID:   "testAlertHandlers",
+			Type: client.StreamTask,
+			DBRPs: []client.DBRP{{
+				Database:        "mydb",
+				RetentionPolicy: "myrp",
+			}},
+			TICKscript: tick,
+			Status:     client.Enabled,
+		}); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+
+		point := "alert value=1 0000000000"
+		v := url.Values{}
+		v.Add("precision", "s")
+		s.MustWrite("mydb", "myrp", point, v)
+
+		// Close the entire server to ensure all data is processed
+		s.Close()
+		closed = true
+
+		if err := tc.result(ctxt); err != nil {
+			t.Errorf("%s: %v", kind, err)
 		}
 	}
 }

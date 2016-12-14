@@ -167,7 +167,7 @@ func (s *Service) preparePost(serviceKey, incidentKey, desc string, level alert.
 type HandlerConfig struct {
 	// The service key to use for the alert.
 	// Defaults to the value in the configuration if empty.
-	ServiceKey string
+	ServiceKey string `mapstructure:"service-key"`
 }
 
 type handler struct {

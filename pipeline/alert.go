@@ -882,17 +882,10 @@ type HipChatHandler struct {
 func (a *AlertNode) Alerta() *AlertaHandler {
 	alerta := &AlertaHandler{
 		AlertNode: a,
-		Resource:  defaultAlertaResource,
-		Event:     defaultAlertaEvent,
-		Group:     defaultAlertaGroup,
 	}
 	a.AlertaHandlers = append(a.AlertaHandlers, alerta)
 	return alerta
 }
-
-const defaultAlertaResource = "{{ .Name }}"
-const defaultAlertaEvent = "{{ .ID }}"
-const defaultAlertaGroup = "{{ .Group }}"
 
 // tick:embedded:AlertNode.Alerta
 type AlertaHandler struct {

@@ -110,6 +110,7 @@ type TaskMaster struct {
 		Handler(hipchat.HandlerConfig, *log.Logger) alert.Handler
 	}
 	AlertaService interface {
+		DefaultHandlerConfig() alerta.HandlerConfig
 		Handler(alerta.HandlerConfig, *log.Logger) (alert.Handler, error)
 	}
 	SensuService interface {

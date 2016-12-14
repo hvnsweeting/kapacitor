@@ -179,22 +179,21 @@ func (s *Service) preparePost(chatId, parseMode, message string, disableWebPageP
 }
 
 type HandlerConfig struct {
-
 	// Telegram user/group ID to post messages to.
 	// If empty uses the chati-d from the configuration.
-	ChatId string
+	ChatId string `mapstructure:"chat-id"`
 
 	// Parse node, defaults to Mardown
 	// If empty uses the parse-mode from the configuration.
-	ParseMode string
+	ParseMode string `mapstructure:"parse-mode"`
 
 	// Web Page preview
 	// If empty uses the disable-web-page-preview from the configuration.
-	DisableWebPagePreview bool
+	DisableWebPagePreview bool `mapstructure:"disable-web-page-preview"`
 
 	// Disables Notification
 	// If empty uses the disable-notification from the configuration.
-	DisableNotification bool
+	DisableNotification bool `mapstructure:"disable-notification"`
 }
 
 type handler struct {

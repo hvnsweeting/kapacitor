@@ -166,11 +166,11 @@ func (s *Service) preparePost(room, token, message string, level alert.Level) (s
 type HandlerConfig struct {
 	// HipChat room in which to post messages.
 	// If empty uses the channel from the configuration.
-	Room string
+	Room string `mapstructure:"room"`
 
 	// HipChat authentication token.
 	// If empty uses the token from the configuration.
-	Token string
+	Token string `mapstructure:"token"`
 }
 
 type handler struct {

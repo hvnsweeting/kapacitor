@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
@@ -31,19 +30,28 @@ import (
 	"github.com/influxdata/kapacitor/models"
 	alertservice "github.com/influxdata/kapacitor/services/alert"
 	"github.com/influxdata/kapacitor/services/alerta"
+	"github.com/influxdata/kapacitor/services/alerta/alertatest"
 	"github.com/influxdata/kapacitor/services/hipchat"
+	"github.com/influxdata/kapacitor/services/hipchat/hipchattest"
 	"github.com/influxdata/kapacitor/services/httpd"
 	k8s "github.com/influxdata/kapacitor/services/k8s/client"
 	"github.com/influxdata/kapacitor/services/logging/loggingtest"
 	"github.com/influxdata/kapacitor/services/opsgenie"
+	"github.com/influxdata/kapacitor/services/opsgenie/opsgenietest"
 	"github.com/influxdata/kapacitor/services/pagerduty"
+	"github.com/influxdata/kapacitor/services/pagerduty/pagerdutytest"
 	"github.com/influxdata/kapacitor/services/sensu"
+	"github.com/influxdata/kapacitor/services/sensu/sensutest"
 	"github.com/influxdata/kapacitor/services/slack"
+	"github.com/influxdata/kapacitor/services/slack/slacktest"
 	"github.com/influxdata/kapacitor/services/smtp"
 	"github.com/influxdata/kapacitor/services/smtp/smtptest"
 	"github.com/influxdata/kapacitor/services/talk"
+	"github.com/influxdata/kapacitor/services/talk/talktest"
 	"github.com/influxdata/kapacitor/services/telegram"
+	"github.com/influxdata/kapacitor/services/telegram/telegramtest"
 	"github.com/influxdata/kapacitor/services/victorops"
+	"github.com/influxdata/kapacitor/services/victorops/victoropstest"
 	"github.com/influxdata/kapacitor/udf"
 	"github.com/influxdata/kapacitor/udf/test"
 	"github.com/influxdata/wlog"
@@ -6417,54 +6425,11 @@ stream
 }
 
 func TestStream_AlertSensu(t *testing.T) {
-	requestCount := int32(0)
-	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+	ts, err := sensutest.NewServer(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	listen, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listen.Close()
-	go func() {
-		for {
-			conn, err := listen.Accept()
-			if err != nil {
-				return
-			}
-			func() {
-				defer conn.Close()
-
-				atomic.AddInt32(&requestCount, 1)
-				type postData struct {
-					Name   string `json:"name"`
-					Source string `json:"source"`
-					Output string `json:"output"`
-					Status int    `json:"status"`
-				}
-				pd := postData{}
-				dec := json.NewDecoder(conn)
-				dec.Decode(&pd)
-
-				if exp := "Kapacitor"; pd.Source != exp {
-					t.Errorf("unexpected source got %s exp %s", pd.Source, exp)
-				}
-
-				if exp := "kapacitor.cpu.serverA is CRITICAL"; pd.Output != exp {
-					t.Errorf("unexpected text got %s exp %s", pd.Output, exp)
-				}
-
-				if exp := "kapacitor.cpu.serverA"; pd.Name != exp {
-					t.Errorf("unexpected text got %s exp %s", pd.Name, exp)
-				}
-
-				if exp := 2; pd.Status != exp {
-					t.Errorf("unexpected status got %v exp %v", pd.Status, exp)
-				}
-			}()
-		}
-	}()
+	defer ts.Close()
 
 	var script = `
 stream
@@ -6486,43 +6451,36 @@ stream
 	tmInit := func(tm *kapacitor.TaskMaster) {
 		c := sensu.NewConfig()
 		c.Enabled = true
-		c.Addr = listen.Addr().String()
+		c.Addr = ts.Addr
 		c.Source = "Kapacitor"
 		sl := sensu.NewService(c, logService.NewLogger("[test_sensu] ", log.LstdFlags))
 		tm.SensuService = sl
 	}
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
-	if rc := atomic.LoadInt32(&requestCount); rc != 1 {
-		t.Errorf("unexpected requestCount got %d exp 1", rc)
+	exp := []interface{}{
+		sensutest.Request{
+			Source: "Kapacitor",
+			Output: "kapacitor.cpu.serverA is CRITICAL",
+			Name:   "kapacitor.cpu.serverA",
+			Status: 2,
+		},
 	}
+
+	ts.Close()
+	var got []interface{}
+	for g := range ts.Requests {
+		got = append(got, g)
+	}
+
+	if err := compareListIgnoreOrder(got, exp, nil); err != nil {
+		t.Error(err)
+	}
+
 }
 
 func TestStream_AlertSlack(t *testing.T) {
-	type attachment struct {
-		Fallback string `json:"fallback"`
-		Color    string `json:"color"`
-		Text     string `json:"text"`
-	}
-	type postData struct {
-		Channel     string       `json:"channel"`
-		Username    string       `json:"username"`
-		Text        string       `json:"text"`
-		Attachments []attachment `json:"attachments"`
-	}
-	type slackRequest struct {
-		URL      string
-		PostData postData
-	}
-	requests := make(chan slackRequest, 2)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sr := slackRequest{
-			URL: r.URL.String(),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&sr.PostData)
-		requests <- sr
-	}))
+	ts := slacktest.NewServer(2)
 	defer ts.Close()
 
 	var script = `
@@ -6557,13 +6515,13 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		slackRequest{
+		slacktest.Request{
 			URL: "/test/slack/url",
-			PostData: postData{
+			PostData: slacktest.PostData{
 				Channel:  "@jim",
 				Username: "kapacitor",
 				Text:     "",
-				Attachments: []attachment{
+				Attachments: []slacktest.Attachment{
 					{
 						Fallback: "kapacitor/cpu/serverA is CRITICAL",
 						Color:    "danger",
@@ -6572,13 +6530,13 @@ stream
 				},
 			},
 		},
-		slackRequest{
+		slacktest.Request{
 			URL: "/test/slack/url",
-			PostData: postData{
+			PostData: slacktest.PostData{
 				Channel:  "#alerts",
 				Username: "kapacitor",
 				Text:     "",
-				Attachments: []attachment{
+				Attachments: []slacktest.Attachment{
 					{
 						Fallback: "kapacitor/cpu/serverA is CRITICAL",
 						Color:    "danger",
@@ -6589,9 +6547,9 @@ stream
 		},
 	}
 
-	close(requests)
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -6601,27 +6559,7 @@ stream
 }
 
 func TestStream_AlertTelegram(t *testing.T) {
-	type postData struct {
-		ChatId                string `json:"chat_id"`
-		Text                  string `json:"text"`
-		ParseMode             string `json:"parse_mode"`
-		DisableWebPagePreview bool   `json:"disable_web_page_preview"`
-		DisableNotification   bool   `json:"disable_notification"`
-	}
-	type telegramRequest struct {
-		URL      string
-		PostData postData
-	}
-
-	requests := make(chan telegramRequest, 2)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tr := telegramRequest{
-			URL: r.URL.String(),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&tr.PostData)
-		requests <- tr
-	}))
+	ts := telegramtest.NewServer(2)
 	defer ts.Close()
 
 	var script = `
@@ -6643,8 +6581,8 @@ stream
 			.chatId('12345678')
 				.disableNotification()
 				.parseMode('HTML')
-			.telegram()
-				.chatId('87654321')
+		.telegram()
+			.chatId('87654321')
 `
 	tmInit := func(tm *kapacitor.TaskMaster) {
 		c := telegram.NewConfig()
@@ -6660,9 +6598,9 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		telegramRequest{
+		telegramtest.Request{
 			URL: "/botTOKEN:AUTH/sendMessage",
-			PostData: postData{
+			PostData: telegramtest.PostData{
 				ChatId:                "12345678",
 				Text:                  "kapacitor/cpu/serverA is CRITICAL",
 				ParseMode:             "HTML",
@@ -6670,9 +6608,9 @@ stream
 				DisableNotification:   true,
 			},
 		},
-		telegramRequest{
+		telegramtest.Request{
 			URL: "/botTOKEN:AUTH/sendMessage",
-			PostData: postData{
+			PostData: telegramtest.PostData{
 				ChatId:                "87654321",
 				Text:                  "kapacitor/cpu/serverA is CRITICAL",
 				ParseMode:             "",
@@ -6682,9 +6620,9 @@ stream
 		},
 	}
 
-	close(requests)
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -6694,25 +6632,7 @@ stream
 }
 
 func TestStream_AlertHipChat(t *testing.T) {
-	type postData struct {
-		From    string `json:"from"`
-		Message string `json:"message"`
-		Color   string `json:"color"`
-		Notify  bool   `json:"notify"`
-	}
-	type hipchatRequest struct {
-		URL      string
-		PostData postData
-	}
-	requests := make(chan hipchatRequest, 2)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hr := hipchatRequest{
-			URL: r.URL.String(),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&hr.PostData)
-		requests <- hr
-	}))
+	ts := hipchattest.NewServer(2)
 	defer ts.Close()
 
 	var script = `
@@ -6750,18 +6670,18 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		hipchatRequest{
+		hipchattest.Request{
 			URL: "/1234567/notification?auth_token=testtoken1234567",
-			PostData: postData{
+			PostData: hipchattest.PostData{
 				From:    "kapacitor",
 				Message: "kapacitor/cpu/serverA is CRITICAL",
 				Color:   "red",
 				Notify:  true,
 			},
 		},
-		hipchatRequest{
+		hipchattest.Request{
 			URL: "/Test%20Room/notification?auth_token=testtokenTestRoom",
-			PostData: postData{
+			PostData: hipchattest.PostData{
 				From:    "kapacitor",
 				Message: "kapacitor/cpu/serverA is CRITICAL",
 				Color:   "red",
@@ -6769,9 +6689,10 @@ stream
 			},
 		},
 	}
-	close(requests)
+
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -6781,33 +6702,7 @@ stream
 }
 
 func TestStream_AlertAlerta(t *testing.T) {
-	type postData struct {
-		Resource    string   `json:"resource"`
-		Event       string   `json:"event"`
-		Group       string   `json:"group"`
-		Environment string   `json:"environment"`
-		Text        string   `json:"text"`
-		Origin      string   `json:"origin"`
-		Service     []string `json:"service"`
-		Value       string   `json:"value"`
-	}
-	type alertaRequest struct {
-		URL           string
-		Authorization string
-		PostData      postData
-	}
-	requests := make(chan alertaRequest, 2)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ar := alertaRequest{
-			URL:           r.URL.String(),
-			Authorization: r.Header.Get("Authorization"),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&ar.PostData)
-		requests <- ar
-
-		w.WriteHeader(http.StatusCreated)
-	}))
+	ts := alertatest.NewServer(2)
 	defer ts.Close()
 
 	var script = `
@@ -6850,10 +6745,10 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		alertaRequest{
+		alertatest.Request{
 			URL:           "/alert",
 			Authorization: "Bearer testtoken1234567",
-			PostData: postData{
+			PostData: alertatest.PostData{
 				Resource:    "cpu",
 				Event:       "serverA",
 				Group:       "host=serverA",
@@ -6863,10 +6758,10 @@ stream
 				Service:     []string{"cpu"},
 			},
 		},
-		alertaRequest{
+		alertatest.Request{
 			URL:           "/alert",
 			Authorization: "Bearer anothertesttoken",
-			PostData: postData{
+			PostData: alertatest.PostData{
 				Resource:    "resource: serverA",
 				Event:       "event: TestStream_Alert",
 				Group:       "serverA",
@@ -6879,9 +6774,9 @@ stream
 		},
 	}
 
-	close(requests)
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -6891,31 +6786,7 @@ stream
 }
 
 func TestStream_AlertOpsGenie(t *testing.T) {
-	type postData struct {
-		ApiKey      string                 `json:"apiKey"`
-		Message     string                 `json:"message"`
-		Entity      string                 `json:"entity"`
-		Alias       string                 `json:"alias"`
-		Note        string                 `json:"note"`
-		Details     map[string]interface{} `json:"details"`
-		Description string                 `json:"description"`
-		Teams       []string               `json:"teams"`
-		Recipients  []string               `json:"recipients"`
-	}
-	type opsgenieRequest struct {
-		URL      string
-		PostData postData
-	}
-
-	requests := make(chan opsgenieRequest, 2)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		or := opsgenieRequest{
-			URL: r.URL.String(),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&or.PostData)
-		requests <- or
-	}))
+	ts := opsgenietest.NewServer(2)
 	defer ts.Close()
 
 	var script = `
@@ -6951,9 +6822,9 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		opsgenieRequest{
+		opsgenietest.Request{
 			URL: "/",
-			PostData: postData{
+			PostData: opsgenietest.PostData{
 				ApiKey:  "api_key",
 				Message: "kapacitor/cpu/serverA is CRITICAL",
 				Entity:  "kapacitor/cpu/serverA",
@@ -6968,9 +6839,9 @@ stream
 				Recipients:  []string{"test_recipient", "another_recipient"},
 			},
 		},
-		opsgenieRequest{
+		opsgenietest.Request{
 			URL: "/",
-			PostData: postData{
+			PostData: opsgenietest.PostData{
 				ApiKey:  "api_key",
 				Message: "kapacitor/cpu/serverA is CRITICAL",
 				Entity:  "kapacitor/cpu/serverA",
@@ -6987,9 +6858,9 @@ stream
 		},
 	}
 
-	close(requests)
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -7000,28 +6871,7 @@ stream
 }
 
 func TestStream_AlertPagerDuty(t *testing.T) {
-	type postData struct {
-		ServiceKey  string `json:"service_key"`
-		EventType   string `json:"event_type"`
-		Description string `json:"description"`
-		Client      string `json:"client"`
-		ClientURL   string `json:"client_url"`
-		Details     string `json:"details"`
-	}
-	type pagerdutyRequest struct {
-		URL      string
-		PostData postData
-	}
-
-	requests := make(chan pagerdutyRequest, 2)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pr := pagerdutyRequest{
-			URL: r.URL.String(),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&pr.PostData)
-		requests <- pr
-	}))
+	ts := pagerdutytest.NewServer(2)
 	defer ts.Close()
 
 	var script = `
@@ -7060,9 +6910,9 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		pagerdutyRequest{
+		pagerdutytest.Request{
 			URL: "/",
-			PostData: postData{
+			PostData: pagerdutytest.PostData{
 				ServiceKey:  "service_key",
 				EventType:   "trigger",
 				Description: "CRITICAL alert for kapacitor/cpu/serverA",
@@ -7071,9 +6921,9 @@ stream
 				Details:     `{"Series":[{"name":"cpu","tags":{"host":"serverA"},"columns":["time","count"],"values":[["1971-01-01T00:00:10Z",10]]}],"Messages":null,"Err":null}`,
 			},
 		},
-		pagerdutyRequest{
+		pagerdutytest.Request{
 			URL: "/",
-			PostData: postData{
+			PostData: pagerdutytest.PostData{
 				ServiceKey:  "test_override_key",
 				EventType:   "trigger",
 				Description: "CRITICAL alert for kapacitor/cpu/serverA",
@@ -7084,9 +6934,9 @@ stream
 		},
 	}
 
-	close(requests)
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -7096,27 +6946,7 @@ stream
 }
 
 func TestStream_AlertVictorOps(t *testing.T) {
-	type postData struct {
-		MessageType    string `json:"message_type"`
-		EntityID       string `json:"entity_id"`
-		StateMessage   string `json:"state_message"`
-		Timestamp      int    `json:"timestamp"`
-		MonitoringTool string `json:"monitoring_tool"`
-		Data           string `json:"data"`
-	}
-	type victoropsRequest struct {
-		URL      string
-		PostData postData
-	}
-	requests := make(chan victoropsRequest, 2)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vr := victoropsRequest{
-			URL: r.URL.String(),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&vr.PostData)
-		requests <- vr
-	}))
+	ts := victoropstest.NewServer(2)
 	defer ts.Close()
 
 	var script = `
@@ -7152,9 +6982,9 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		victoropsRequest{
+		victoropstest.Request{
 			URL: "/api_key/test_key",
-			PostData: postData{
+			PostData: victoropstest.PostData{
 				MessageType:    "CRITICAL",
 				EntityID:       "kapacitor/cpu/serverA",
 				StateMessage:   "kapacitor/cpu/serverA is CRITICAL",
@@ -7163,9 +6993,9 @@ stream
 				Data:           `{"Series":[{"name":"cpu","tags":{"host":"serverA"},"columns":["time","count"],"values":[["1971-01-01T00:00:10Z",10]]}],"Messages":null,"Err":null}`,
 			},
 		},
-		victoropsRequest{
+		victoropstest.Request{
 			URL: "/api_key/test_key2",
-			PostData: postData{
+			PostData: victoropstest.PostData{
 				MessageType:    "CRITICAL",
 				EntityID:       "kapacitor/cpu/serverA",
 				StateMessage:   "kapacitor/cpu/serverA is CRITICAL",
@@ -7176,9 +7006,9 @@ stream
 		},
 	}
 
-	close(requests)
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -7188,25 +7018,7 @@ stream
 }
 
 func TestStream_AlertTalk(t *testing.T) {
-	type postData struct {
-		Title      string `json:"title"`
-		Text       string `json:"text"`
-		AuthorName string `json:"authorName"`
-	}
-	type talkRequest struct {
-		URL      string
-		PostData postData
-	}
-	requests := make(chan talkRequest, 1)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tr := talkRequest{
-			URL: r.URL.String(),
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.Decode(&tr.PostData)
-		requests <- tr
-
-	}))
+	ts := talktest.NewServer(1)
 	defer ts.Close()
 
 	var script = `
@@ -7238,9 +7050,9 @@ stream
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
 	exp := []interface{}{
-		talkRequest{
+		talktest.Request{
 			URL: "/",
-			PostData: postData{
+			PostData: talktest.PostData{
 				AuthorName: "Kapacitor",
 				Text:       "kapacitor/cpu/serverA is CRITICAL",
 				Title:      "kapacitor/cpu/serverA",
@@ -7248,9 +7060,9 @@ stream
 		},
 	}
 
-	close(requests)
+	ts.Close()
 	var got []interface{}
-	for g := range requests {
+	for g := range ts.Requests {
 		got = append(got, g)
 	}
 
@@ -7525,27 +7337,6 @@ Value: 10
 `,
 		},
 	}
-	compareMessages := func(exp, got *smtptest.Message) error {
-		if exp.Body != got.Body {
-			return fmt.Errorf("unequal bodies:\ngot\n%q\nexp\n%q\n", got.Body, exp.Body)
-		}
-		// Compare only the header keys specified in the exp message.
-		for k, ev := range exp.Header {
-			gv, ok := got.Header[k]
-			if !ok {
-				return fmt.Errorf("missing header %s", k)
-			}
-			if len(gv) != len(ev) {
-				return fmt.Errorf("unexpected header %s: got %v exp %v", k, gv, ev)
-			}
-			for i := range ev {
-				if gv[i] != ev[i] {
-					return fmt.Errorf("unexpected header %s: got %v exp %v", k, gv, ev)
-				}
-			}
-		}
-		return nil
-	}
 
 	smtpServer, err := smtptest.NewServer()
 	if err != nil {
@@ -7583,7 +7374,7 @@ Value: 10
 	}
 	for i, exp := range expMail {
 		got := msgs[i]
-		if err := compareMessages(exp, got); err != nil {
+		if err := exp.Compare(got); err != nil {
 			t.Errorf("%d %s", i, err)
 		}
 	}
