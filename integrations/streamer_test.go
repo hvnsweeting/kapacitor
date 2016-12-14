@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -24,6 +23,7 @@ import (
 	imodels "github.com/influxdata/influxdb/models"
 	"github.com/influxdata/kapacitor"
 	"github.com/influxdata/kapacitor/alert"
+	"github.com/influxdata/kapacitor/alert/alerttest"
 	"github.com/influxdata/kapacitor/clock"
 	"github.com/influxdata/kapacitor/command"
 	"github.com/influxdata/kapacitor/command/commandtest"
@@ -7079,6 +7079,10 @@ func TestStream_AlertLog(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	normalPath := filepath.Join(tmpDir, "normal.log")
 	modePath := filepath.Join(tmpDir, "mode.log")
+
+	normal := alerttest.NewLogTest(normalPath)
+	mode := alerttest.NewLogTest(modePath)
+
 	var script = fmt.Sprintf(`
 stream
 	|from()
@@ -7100,7 +7104,7 @@ stream
 			.mode(0644)
 `, normalPath, modePath)
 
-	expAD := alert.AlertData{
+	expAD := []alert.AlertData{{
 		ID:      "kapacitor.cpu.serverA",
 		Message: "kapacitor.cpu.serverA is CRITICAL",
 		Time:    time.Date(1971, 01, 01, 0, 0, 10, 0, time.UTC),
@@ -7118,50 +7122,35 @@ stream
 				},
 			},
 		},
+	}}
+
+	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, nil)
+
+	testLog := func(name string, expData []alert.AlertData, expMode os.FileMode, l *alerttest.LogTest) error {
+		m, err := l.Mode()
+		if err != nil {
+			return err
+		}
+		if got, exp := m, expMode; exp != got {
+			return fmt.Errorf("%s unexpected file mode: got %v exp %v", name, got, exp)
+		}
+		data, err := l.Data()
+		if err != nil {
+			return err
+		}
+		if got, exp := data, expData; !reflect.DeepEqual(got, exp) {
+			return fmt.Errorf("%s unexpected alert data written to log:\ngot\n%+v\nexp\n%+v\n", name, got, exp)
+		}
+		return nil
 	}
 
-	testAD := func(name string, f io.Reader) {
-		ad := alert.AlertData{}
-		if err := json.NewDecoder(f).Decode(&ad); err != nil {
-			t.Fatal(err)
-		}
-		if got, exp := ad, expAD; !reflect.DeepEqual(got, exp) {
-			t.Errorf("%s unexpected alert data written to log:\ngot\n%+v\nexp\n%+v\n", name, got, exp)
-		}
+	if err := testLog("normal", expAD, 0600, normal); err != nil {
+		t.Error(err)
 	}
-
-	clock, et, replayErr, tm := testStreamer(t, "TestStream_Alert", script, nil)
-	defer tm.Close()
-
-	err = fastForwardTask(clock, et, replayErr, tm, 13*time.Second)
-	if err != nil {
+	if err := testLog("mode", expAD, 0644, mode); err != nil {
 		t.Error(err)
 	}
 
-	normal, err := os.Open(normalPath)
-	if err != nil {
-		t.Fatalf("missing log file for alert %v", err)
-	}
-	defer normal.Close()
-	if stat, err := normal.Stat(); err != nil {
-		t.Fatal(err)
-	} else if exp, got := os.FileMode(0600), stat.Mode(); exp != got {
-		t.Errorf("unexpected normal file mode: got %v exp %v", got, exp)
-	}
-	testAD("normal", normal)
-
-	mode, err := os.Open(modePath)
-	if err != nil {
-		t.Fatalf("missing log file for alert %v", err)
-	}
-	defer mode.Close()
-	if stat, err := mode.Stat(); err != nil {
-		t.Fatal(err)
-	} else if exp, got := os.FileMode(0644), stat.Mode(); exp != got {
-		t.Errorf("unexpected normal file mode: got %v exp %v", got, exp)
-	}
-
-	testAD("mode", mode)
 }
 
 func TestStream_AlertExec(t *testing.T) {

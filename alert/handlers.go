@@ -3,10 +3,12 @@ package alert
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/influxdata/influxdb/influxql"
@@ -42,8 +44,18 @@ func alertDataFromEvent(event Event) AlertData {
 const defaultLogFileMode = 0600
 
 type LogHandlerConfig struct {
-	Path string
-	Mode os.FileMode
+	Path string      `mapstructure:"path"`
+	Mode os.FileMode `mapstructure:"mode"`
+}
+
+func (c LogHandlerConfig) Validate() error {
+	if c.Mode.Perm()&0200 == 0 {
+		return fmt.Errorf("invalid file mode %v, must be user writable", c.Mode)
+	}
+	if !filepath.IsAbs(c.Path) {
+		return fmt.Errorf("log path must be absolute: %s is not absolute", c.Path)
+	}
+	return nil
 }
 
 type logHandler struct {
@@ -52,18 +64,27 @@ type logHandler struct {
 	logger  *log.Logger
 }
 
-func NewLogHandler(c LogHandlerConfig, l *log.Logger) Handler {
+func DefaultLogHandlerConfig() LogHandlerConfig {
+	return LogHandlerConfig{
+		Mode: defaultLogFileMode,
+	}
+}
+
+func NewLogHandler(c LogHandlerConfig, l *log.Logger) (Handler, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
 	return &logHandler{
 		logpath: c.Path,
 		mode:    c.Mode,
 		logger:  l,
-	}
+	}, nil
 }
 
 func (h *logHandler) Handle(event Event) {
 	ad := alertDataFromEvent(event)
 
-	f, err := os.OpenFile(h.logpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(h.mode))
+	f, err := os.OpenFile(h.logpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, h.mode)
 	if err != nil {
 		h.logger.Printf("E! failed to open file %s for alert logging: %v", h.logpath, err)
 		return

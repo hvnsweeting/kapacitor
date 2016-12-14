@@ -7,7 +7,6 @@ import (
 	html "html/template"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	text "text/template"
 	"time"
@@ -165,14 +164,15 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 	}
 
 	for _, log := range n.LogHandlers {
-		if !filepath.IsAbs(log.FilePath) {
-			return nil, fmt.Errorf("alert log path must be absolute: %s is not absolute", log.FilePath)
+		c := alert.DefaultLogHandlerConfig()
+		c.Path = log.FilePath
+		if log.Mode != 0 {
+			c.Mode = os.FileMode(log.Mode)
 		}
-		c := alert.LogHandlerConfig{
-			Path: log.FilePath,
-			Mode: os.FileMode(log.Mode),
+		h, err := alert.NewLogHandler(c, l)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create log alert handler")
 		}
-		h := alert.NewLogHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 

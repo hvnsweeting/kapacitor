@@ -700,6 +700,17 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 		}
 		h := s.HipChatService.Handler(c, s.logger)
 		ha = newPassThroughHandler(h)
+	case "log":
+		c := alert.DefaultLogHandlerConfig()
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h, err := alert.NewLogHandler(c, s.logger)
+		if err != nil {
+			return nil, err
+		}
+		ha = newPassThroughHandler(h)
 	case "opsgenie":
 		c := opsgenie.HandlerConfig{}
 		err = decodeOptions(spec.Options, &c)
@@ -754,14 +765,7 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 		}
 		h := s.VictorOpsService.Handler(c, s.logger)
 		ha = newPassThroughHandler(h)
-	case "log":
-		c := alert.LogHandlerConfig{}
-		err = decodeOptions(spec.Options, &c)
-		if err != nil {
-			return
-		}
-		h := alert.NewLogHandler(c, s.logger)
-		ha = newPassThroughHandler(h)
+	//TODO add tests for log, exec, tcp, and post
 	case "exec":
 		c := alert.ExecHandlerConfig{
 			Commander: s.Commander,

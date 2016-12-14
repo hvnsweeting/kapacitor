@@ -25,6 +25,8 @@ import (
 	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/toml"
+	"github.com/influxdata/kapacitor/alert"
+	"github.com/influxdata/kapacitor/alert/alerttest"
 	"github.com/influxdata/kapacitor/client/v1"
 	"github.com/influxdata/kapacitor/server"
 	"github.com/influxdata/kapacitor/services/alerta/alertatest"
@@ -6842,6 +6844,10 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 }
 
 func TestServer_AlertHandlers(t *testing.T) {
+	tdir := MustTempDir()
+	t.Log(tdir)
+	//defer os.RemoveAll(tdir)
+
 	testCases := []struct {
 		handlerAction client.HandlerAction
 		setup         func(*server.Config) (context.Context, error)
@@ -6925,6 +6931,60 @@ func TestServer_AlertHandlers(t *testing.T) {
 				}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected hipchat request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "log",
+				Options: map[string]interface{}{
+					"path": path.Join(tdir, "alert.log"),
+					"mode": 0604,
+				},
+			},
+			setup: func(c *server.Config) (context.Context, error) {
+				p := path.Join(tdir, "alert.log")
+				l := alerttest.NewLogTest(p)
+				ctxt := context.WithValue(nil, "log", l)
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				l := ctxt.Value("log").(*alerttest.LogTest)
+				expData := []alert.AlertData{{
+					ID:      "id",
+					Message: "message",
+					Details: "details",
+					Time:    time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+					Level:   alert.Critical,
+					Data: influxql.Result{
+						Series: models.Rows{
+							{
+								Name:    "alert",
+								Columns: []string{"time", "value"},
+								Values: [][]interface{}{[]interface{}{
+									time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+									1.0,
+								}},
+							},
+						},
+					},
+				}}
+				expMode := os.FileMode(0604)
+
+				m, err := l.Mode()
+				if err != nil {
+					return err
+				}
+				if got, exp := m, expMode; exp != got {
+					return fmt.Errorf("unexpected file mode: got %v exp %v", got, exp)
+				}
+				data, err := l.Data()
+				if err != nil {
+					return err
+				}
+				if got, exp := data, expData; !reflect.DeepEqual(got, exp) {
+					return fmt.Errorf("unexpected alert data written to log:\ngot\n%+v\nexp\n%+v\n", got, exp)
 				}
 				return nil
 			},
