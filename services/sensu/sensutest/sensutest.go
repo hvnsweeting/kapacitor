@@ -8,14 +8,13 @@ import (
 
 type Server struct {
 	l        *net.TCPListener
-	requests chan Request
-	Requests <-chan Request
+	requests []Request
 	Addr     string
 	wg       sync.WaitGroup
 	closed   bool
 }
 
-func NewServer(count int) (*Server, error) {
+func NewServer() (*Server, error) {
 	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
 	if err != nil {
 		return nil, err
@@ -24,12 +23,9 @@ func NewServer(count int) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	requests := make(chan Request, count)
 	s := &Server{
-		l:        l,
-		requests: requests,
-		Requests: requests,
-		Addr:     l.Addr().String(),
+		l:    l,
+		Addr: l.Addr().String(),
 	}
 	s.wg.Add(1)
 	go func() {
@@ -39,6 +35,10 @@ func NewServer(count int) (*Server, error) {
 	return s, nil
 }
 
+func (s *Server) Requests() []Request {
+	return s.requests
+}
+
 func (s *Server) Close() {
 	if s.closed {
 		return
@@ -46,7 +46,6 @@ func (s *Server) Close() {
 	s.closed = true
 	s.l.Close()
 	s.wg.Wait()
-	close(s.requests)
 }
 
 func (s *Server) run() {
@@ -58,9 +57,8 @@ func (s *Server) run() {
 		func() {
 			defer conn.Close()
 			r := Request{}
-			dec := json.NewDecoder(conn)
-			dec.Decode(&r)
-			s.requests <- r
+			json.NewDecoder(conn).Decode(&r)
+			s.requests = append(s.requests, r)
 		}()
 	}
 }

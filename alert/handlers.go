@@ -98,26 +98,26 @@ func (h *logHandler) Handle(event Event) {
 }
 
 type ExecHandlerConfig struct {
-	Prog      string
-	Args      []string
-	Commander command.Commander
+	Prog      string            `mapstructure:"prog"`
+	Args      []string          `mapstructure:"args"`
+	Commander command.Commander `mapstructure:"-"`
 }
 
 type execHandler struct {
 	bp        *bufpool.Pool
-	ci        command.CommandInfo
+	s         command.Spec
 	commander command.Commander
 	logger    *log.Logger
 }
 
 func NewExecHandler(c ExecHandlerConfig, l *log.Logger) Handler {
-	ci := command.CommandInfo{
+	s := command.Spec{
 		Prog: c.Prog,
 		Args: c.Args,
 	}
 	return &execHandler{
 		bp:        bufpool.New(),
-		ci:        ci,
+		s:         s,
 		commander: c.Commander,
 		logger:    l,
 	}
@@ -134,7 +134,7 @@ func (h *execHandler) Handle(event Event) {
 		return
 	}
 
-	cmd := h.commander.NewCommand(h.ci)
+	cmd := h.commander.NewCommand(h.s)
 	cmd.Stdin(buf)
 	var out bytes.Buffer
 	cmd.Stdout(&out)
@@ -152,7 +152,7 @@ func (h *execHandler) Handle(event Event) {
 }
 
 type TCPHandlerConfig struct {
-	Addr string
+	Address string `mapstructure:"address"`
 }
 
 type tcpHandler struct {
@@ -164,7 +164,7 @@ type tcpHandler struct {
 func NewTCPHandler(c TCPHandlerConfig, l *log.Logger) Handler {
 	return &tcpHandler{
 		bp:     bufpool.New(),
-		addr:   c.Addr,
+		addr:   c.Address,
 		logger: l,
 	}
 }
@@ -192,7 +192,7 @@ func (h *tcpHandler) Handle(event Event) {
 }
 
 type PostHandlerConfig struct {
-	URL string
+	URL string `mapstructure:"url"`
 }
 
 type postHandler struct {

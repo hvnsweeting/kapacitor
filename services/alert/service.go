@@ -692,6 +692,17 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 			return nil, err
 		}
 		ha = newPassThroughHandler(h)
+	case "exec":
+		c := alert.ExecHandlerConfig{
+			Commander: s.Commander,
+		}
+		log.Println("D! exec config", c)
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := alert.NewExecHandler(c, s.logger)
+		ha = newPassThroughHandler(h)
 	case "hipchat":
 		c := hipchat.HandlerConfig{}
 		err = decodeOptions(spec.Options, &c)
@@ -727,6 +738,14 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 		}
 		h := s.PagerDutyService.Handler(c, s.logger)
 		ha = newPassThroughHandler(h)
+	case "post":
+		c := alert.PostHandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := alert.NewPostHandler(c, s.logger)
+		ha = newPassThroughHandler(h)
 	case "sensu":
 		h := s.SensuService.Handler(s.logger)
 		ha = newPassThroughHandler(h)
@@ -749,6 +768,14 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 	case "talk":
 		h := s.TalkService.Handler(s.logger)
 		ha = newPassThroughHandler(h)
+	case "tcp":
+		c := alert.TCPHandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		h := alert.NewTCPHandler(c, s.logger)
+		ha = newPassThroughHandler(h)
 	case "telegram":
 		c := telegram.HandlerConfig{}
 		err = decodeOptions(spec.Options, &c)
@@ -764,33 +791,6 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha Handle
 			return
 		}
 		h := s.VictorOpsService.Handler(c, s.logger)
-		ha = newPassThroughHandler(h)
-	//TODO add tests for log, exec, tcp, and post
-	case "exec":
-		c := alert.ExecHandlerConfig{
-			Commander: s.Commander,
-		}
-		err = decodeOptions(spec.Options, &c)
-		if err != nil {
-			return
-		}
-		h := alert.NewExecHandler(c, s.logger)
-		ha = newPassThroughHandler(h)
-	case "tcp":
-		c := alert.TCPHandlerConfig{}
-		err = decodeOptions(spec.Options, &c)
-		if err != nil {
-			return
-		}
-		h := alert.NewTCPHandler(c, s.logger)
-		ha = newPassThroughHandler(h)
-	case "post":
-		c := alert.PostHandlerConfig{}
-		err = decodeOptions(spec.Options, &c)
-		if err != nil {
-			return
-		}
-		h := alert.NewPostHandler(c, s.logger)
 		ha = newPassThroughHandler(h)
 	default:
 		err = fmt.Errorf("unsupported action kind %q", spec.Kind)

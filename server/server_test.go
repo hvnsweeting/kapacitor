@@ -28,6 +28,8 @@ import (
 	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/alert/alerttest"
 	"github.com/influxdata/kapacitor/client/v1"
+	"github.com/influxdata/kapacitor/command"
+	"github.com/influxdata/kapacitor/command/commandtest"
 	"github.com/influxdata/kapacitor/server"
 	"github.com/influxdata/kapacitor/services/alerta/alertatest"
 	"github.com/influxdata/kapacitor/services/hipchat/hipchattest"
@@ -6844,13 +6846,35 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 }
 
 func TestServer_AlertHandlers(t *testing.T) {
-	tdir := MustTempDir()
-	t.Log(tdir)
-	//defer os.RemoveAll(tdir)
 
+	resultJSON := `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`
+
+	alertData := alert.AlertData{
+		ID:      "id",
+		Message: "message",
+		Details: "details",
+		Time:    time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+		Level:   alert.Critical,
+		Data: influxql.Result{
+			Series: models.Rows{
+				{
+					Name:    "alert",
+					Columns: []string{"time", "value"},
+					Values: [][]interface{}{[]interface{}{
+						time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+						1.0,
+					}},
+				},
+			},
+		},
+	}
+	adJSON, err := json.Marshal(alertData)
+	if err != nil {
+		t.Fatal(err)
+	}
 	testCases := []struct {
 		handlerAction client.HandlerAction
-		setup         func(*server.Config) (context.Context, error)
+		setup         func(*server.Config, *client.HandlerAction) (context.Context, error)
 		result        func(context.Context) error
 	}{
 		{
@@ -6863,8 +6887,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"environment": "env",
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := alertatest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := alertatest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.Alerta.Enabled = true
@@ -6874,11 +6898,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*alertatest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected alerta message to be sent")
-				}
-				exp := alertatest.Request{
+				got := ts.Requests()
+				exp := []alertatest.Request{{
 					URL:           "/alert",
 					Authorization: "Bearer testtoken1234567",
 					PostData: alertatest.PostData{
@@ -6890,9 +6911,47 @@ func TestServer_AlertHandlers(t *testing.T) {
 						Origin:      "kapacitor",
 						Service:     []string{"alert"},
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected alerta request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "exec",
+				Options: map[string]interface{}{
+					"prog": "/bin/alert-handler.sh",
+					"args": []string{"arg1", "arg2", "arg3"},
+				},
+			},
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				te := alerttest.NewExec()
+				ctxt := context.WithValue(nil, "exec", te)
+				c.Commander = te.Commander
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				te := ctxt.Value("exec").(*alerttest.Exec)
+				expData := []*commandtest.Command{{
+					Spec: command.Spec{
+						Prog: "/bin/alert-handler.sh",
+						Args: []string{"arg1", "arg2", "arg3"},
+					},
+					Started:   true,
+					Waited:    true,
+					Killed:    false,
+					StdinData: append(adJSON, '\n'),
+				}}
+				cmds := te.Commands()
+				if got, exp := len(cmds), len(expData); got != exp {
+					return fmt.Errorf("unexpected commands length: got %d exp %d", got, exp)
+				}
+				for i := range expData {
+					if err := expData[i].Compare(cmds[i]); err != nil {
+						return fmt.Errorf("unexpected command %d: %v", i, err)
+					}
 				}
 				return nil
 			},
@@ -6905,8 +6964,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"room":  "1234567",
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := hipchattest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := hipchattest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.HipChat.Enabled = true
@@ -6916,11 +6975,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*hipchattest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected hipchat message to be sent")
-				}
-				exp := hipchattest.Request{
+				got := ts.Requests()
+				exp := []hipchattest.Request{{
 					URL: "/1234567/notification?auth_token=testtoken1234567",
 					PostData: hipchattest.PostData{
 						From:    "kapacitor",
@@ -6928,7 +6984,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 						Color:   "red",
 						Notify:  true,
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected hipchat request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
@@ -6939,37 +6995,26 @@ func TestServer_AlertHandlers(t *testing.T) {
 			handlerAction: client.HandlerAction{
 				Kind: "log",
 				Options: map[string]interface{}{
-					"path": path.Join(tdir, "alert.log"),
 					"mode": 0604,
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				tdir := MustTempDir()
 				p := path.Join(tdir, "alert.log")
-				l := alerttest.NewLogTest(p)
-				ctxt := context.WithValue(nil, "log", l)
+
+				ha.Options["path"] = p
+
+				l := alerttest.NewLog(p)
+
+				ctxt := context.WithValue(nil, "tdir", tdir)
+				ctxt = context.WithValue(ctxt, "log", l)
 				return ctxt, nil
 			},
 			result: func(ctxt context.Context) error {
-				l := ctxt.Value("log").(*alerttest.LogTest)
-				expData := []alert.AlertData{{
-					ID:      "id",
-					Message: "message",
-					Details: "details",
-					Time:    time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
-					Level:   alert.Critical,
-					Data: influxql.Result{
-						Series: models.Rows{
-							{
-								Name:    "alert",
-								Columns: []string{"time", "value"},
-								Values: [][]interface{}{[]interface{}{
-									time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
-									1.0,
-								}},
-							},
-						},
-					},
-				}}
+				tdir := ctxt.Value("tdir").(string)
+				defer os.RemoveAll(tdir)
+				l := ctxt.Value("log").(*alerttest.Log)
+				expData := []alert.AlertData{alertData}
 				expMode := os.FileMode(0604)
 
 				m, err := l.Mode()
@@ -6997,8 +7042,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"recipients-list": []string{"test_recipient1", "test_recipient2"},
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := opsgenietest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := opsgenietest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.OpsGenie.Enabled = true
@@ -7009,11 +7054,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*opsgenietest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected opsgenie message to be sent")
-				}
-				exp := opsgenietest.Request{
+				got := ts.Requests()
+				exp := []opsgenietest.Request{{
 					URL: "/",
 					PostData: opsgenietest.PostData{
 						ApiKey:  "api_key",
@@ -7025,11 +7067,11 @@ func TestServer_AlertHandlers(t *testing.T) {
 							"Level":           "CRITICAL",
 							"Monitoring Tool": "Kapacitor",
 						},
-						Description: `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`,
+						Description: resultJSON,
 						Teams:       []string{"A team", "B team"},
 						Recipients:  []string{"test_recipient1", "test_recipient2"},
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected opsgenie request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
@@ -7043,8 +7085,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"service-key": "service_key",
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := pagerdutytest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := pagerdutytest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.PagerDuty.Enabled = true
@@ -7055,11 +7097,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 				ts := ctxt.Value("server").(*pagerdutytest.Server)
 				kapacitorURL := ctxt.Value("kapacitorURL").(string)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected pagerduty message to be sent")
-				}
-				exp := pagerdutytest.Request{
+				got := ts.Requests()
+				exp := []pagerdutytest.Request{{
 					URL: "/",
 					PostData: pagerdutytest.PostData{
 						ServiceKey:  "service_key",
@@ -7067,9 +7106,9 @@ func TestServer_AlertHandlers(t *testing.T) {
 						Description: "message",
 						Client:      "kapacitor",
 						ClientURL:   kapacitorURL,
-						Details:     `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`,
+						Details:     resultJSON,
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected pagerduty request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
@@ -7078,10 +7117,33 @@ func TestServer_AlertHandlers(t *testing.T) {
 		},
 		{
 			handlerAction: client.HandlerAction{
+				Kind: "post",
+			},
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := alerttest.NewPostServer()
+
+				ha.Options = map[string]interface{}{"url": ts.URL}
+
+				ctxt := context.WithValue(nil, "server", ts)
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*alerttest.PostServer)
+				ts.Close()
+				exp := []alert.AlertData{alertData}
+				got := ts.Data()
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected post request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
 				Kind: "sensu",
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts, err := sensutest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts, err := sensutest.NewServer()
 				if err != nil {
 					return nil, err
 				}
@@ -7095,16 +7157,13 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*sensutest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected sensu message to be sent")
-				}
-				exp := sensutest.Request{
+				exp := []sensutest.Request{{
 					Source: "Kapacitor",
 					Output: "message",
 					Name:   "id",
 					Status: 2,
-				}
+				}}
+				got := ts.Requests()
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected sensu request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
@@ -7118,8 +7177,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"channel": "#test",
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := slacktest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := slacktest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.Slack.Enabled = true
@@ -7129,11 +7188,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*slacktest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected slack message to be sent")
-				}
-				exp := slacktest.Request{
+				got := ts.Requests()
+				exp := []slacktest.Request{{
 					URL: "/test/slack/url",
 					PostData: slacktest.PostData{
 						Channel:  "#test",
@@ -7147,7 +7203,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 							},
 						},
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected slack request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
@@ -7161,7 +7217,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"to": []string{"oncall@example.com", "backup@example.com"},
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
 				ts, err := smtptest.NewServer()
 				if err != nil {
 					return nil, err
@@ -7211,8 +7267,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 			handlerAction: client.HandlerAction{
 				Kind: "talk",
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := talktest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := talktest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.Talk.Enabled = true
@@ -7223,20 +7279,43 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*talktest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected talk message to be sent")
-				}
-				exp := talktest.Request{
+				got := ts.Requests()
+				exp := []talktest.Request{{
 					URL: "/",
 					PostData: talktest.PostData{
 						AuthorName: "Kapacitor",
 						Text:       "message",
 						Title:      "id",
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected talk request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handlerAction: client.HandlerAction{
+				Kind: "tcp",
+			},
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts, err := alerttest.NewTCPServer()
+				if err != nil {
+					return nil, err
+				}
+
+				ha.Options = map[string]interface{}{"address": ts.Addr}
+
+				ctxt := context.WithValue(nil, "server", ts)
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				ts := ctxt.Value("server").(*alerttest.TCPServer)
+				ts.Close()
+				exp := []alert.AlertData{alertData}
+				got := ts.Data()
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected tcp request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
 				return nil
 			},
@@ -7249,8 +7328,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"disable-web-page-preview": true,
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := telegramtest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := telegramtest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.Telegram.Enabled = true
@@ -7261,11 +7340,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*telegramtest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected telegram message to be sent")
-				}
-				exp := telegramtest.Request{
+				got := ts.Requests()
+				exp := []telegramtest.Request{{
 					URL: "/botTOKEN:AUTH/sendMessage",
 					PostData: telegramtest.PostData{
 						ChatId:                "chat id",
@@ -7274,7 +7350,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 						DisableWebPagePreview: true,
 						DisableNotification:   false,
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected telegram request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
@@ -7288,8 +7364,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 					"routing-key": "key",
 				},
 			},
-			setup: func(c *server.Config) (context.Context, error) {
-				ts := victoropstest.NewServer(1)
+			setup: func(c *server.Config, ha *client.HandlerAction) (context.Context, error) {
+				ts := victoropstest.NewServer()
 				ctxt := context.WithValue(nil, "server", ts)
 
 				c.VictorOps.Enabled = true
@@ -7300,11 +7376,8 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*victoropstest.Server)
 				ts.Close()
-				got, ok := <-ts.Requests
-				if !ok {
-					return errors.New("expected victorops message to be sent")
-				}
-				exp := victoropstest.Request{
+				got := ts.Requests()
+				exp := []victoropstest.Request{{
 					URL: "/api_key/key",
 					PostData: victoropstest.PostData{
 						MessageType:    "CRITICAL",
@@ -7312,9 +7385,9 @@ func TestServer_AlertHandlers(t *testing.T) {
 						StateMessage:   "message",
 						Timestamp:      0,
 						MonitoringTool: "kapacitor",
-						Data:           `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`,
+						Data:           resultJSON,
 					},
-				}
+				}}
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected victorops request:\nexp\n%+v\ngot\n%+v\n", exp, got)
 				}
@@ -7329,7 +7402,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 		var ctxt context.Context
 		if tc.setup != nil {
 			var err error
-			ctxt, err = tc.setup(c)
+			ctxt, err = tc.setup(c, &tc.handlerAction)
 			if err != nil {
 				t.Fatal(err)
 			}

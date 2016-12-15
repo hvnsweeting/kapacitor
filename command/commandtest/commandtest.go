@@ -1,47 +1,90 @@
 package commandtest
 
 import (
-	"errors"
+	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"reflect"
 	"sync"
 
 	"github.com/influxdata/kapacitor/command"
 )
 
-type CommanderTest struct {
-	NewCommandHook func(c *CommandTest)
+type Commander struct {
+	sync.Mutex
+	cmds []*Command
 }
 
-func (c CommanderTest) NewCommand(ci command.CommandInfo) command.Command {
-	cmd := &CommandTest{
-		Info: ci,
+func (c *Commander) NewCommand(s command.Spec) command.Command {
+	c.Lock()
+	defer c.Unlock()
+	cmd := &Command{
+		Spec: s,
 	}
-	if c.NewCommandHook != nil {
-		c.NewCommandHook(cmd)
-	}
+	c.cmds = append(c.cmds, cmd)
 	return cmd
 }
 
-type CommandTest struct {
-	sync.Mutex
-	Info command.CommandInfo
-
-	StdinPipeFunc  func() (io.WriteCloser, error)
-	StdoutPipeFunc func() (io.Reader, error)
-	StderrPipeFunc func() (io.Reader, error)
-
-	Started     bool
-	Waited      bool
-	Killed      bool
-	StdinData   []byte
-	StdoutValue io.Writer
-	StderrValue io.Writer
-
-	stdin io.Reader
+func (c *Commander) Commands() []*Command {
+	c.Lock()
+	defer c.Unlock()
+	return c.cmds
 }
 
-func (c *CommandTest) Start() error {
+type Command struct {
+	sync.Mutex
+	Spec command.Spec
+
+	Started   bool
+	Waited    bool
+	Killed    bool
+	StdinData []byte
+
+	StdinPipeCalled  bool
+	StdoutPipeCalled bool
+	StderrPipeCalled bool
+
+	stdin  io.Reader
+	stdinR *io.PipeReader
+	stdinW *io.PipeWriter
+}
+
+func (c *Command) Compare(o *Command) error {
+	c.Lock()
+	o.Lock()
+	defer c.Unlock()
+	defer o.Unlock()
+
+	if got, exp := o.Spec, c.Spec; !reflect.DeepEqual(got, exp) {
+		return fmt.Errorf("unexpected command infos value: got %v exp %v", got, exp)
+	}
+	if got, exp := o.Started, c.Started; got != exp {
+		return fmt.Errorf("unexpected started value: got %v exp %v", got, exp)
+	}
+	if got, exp := o.Waited, c.Waited; got != exp {
+		return fmt.Errorf("unexpected waited value: got %v exp %v", got, exp)
+	}
+	if got, exp := o.Killed, c.Killed; got != exp {
+		return fmt.Errorf("unexpected killed value: got %v exp %v", got, exp)
+	}
+	if got, exp := o.StdinData, c.StdinData; !bytes.Equal(got, exp) {
+		return fmt.Errorf("unexpected stdin data value:\ngot\n%q\nexp\n%q\n", string(got), string(exp))
+	}
+
+	if got, exp := o.StdinPipeCalled, c.StdinPipeCalled; got != exp {
+		return fmt.Errorf("unexpected StdinPipeCalled value: got %v exp %v", got, exp)
+	}
+	if got, exp := o.StdoutPipeCalled, c.StdoutPipeCalled; got != exp {
+		return fmt.Errorf("unexpected StdoutPipeCalled value: got %v exp %v", got, exp)
+	}
+	if got, exp := o.StderrPipeCalled, c.StderrPipeCalled; got != exp {
+		return fmt.Errorf("unexpected StderrPipeCalled value: got %v exp %v", got, exp)
+	}
+	return nil
+}
+
+func (c *Command) Start() error {
 	c.Lock()
 	defer c.Unlock()
 	c.Started = true
@@ -52,47 +95,45 @@ func (c *CommandTest) Start() error {
 	c.StdinData = data
 	return nil
 }
-func (c *CommandTest) Wait() error {
+func (c *Command) Wait() error {
 	c.Lock()
 	c.Waited = true
 	c.Unlock()
 	return nil
 }
-func (c *CommandTest) Stdin(in io.Reader) {
+func (c *Command) Stdin(in io.Reader) {
 	c.Lock()
 	c.stdin = in
 	c.Unlock()
 }
-func (c *CommandTest) Stdout(out io.Writer) {
-	c.Lock()
-	c.StdoutValue = out
-	c.Unlock()
+func (c *Command) Stdout(out io.Writer) {
+	// Not useful to keep value so just ignore it
 }
-func (c *CommandTest) Stderr(err io.Writer) {
-	c.Lock()
-	c.StderrValue = err
-	c.Unlock()
+func (c *Command) Stderr(err io.Writer) {
+	// Not useful to keep value so just ignore it
 }
-func (c *CommandTest) Kill() {
+func (c *Command) Kill() {
 	c.Lock()
 	c.Killed = true
 	c.Unlock()
 }
-func (c *CommandTest) StdinPipe() (io.WriteCloser, error) {
-	if c.StdinPipeFunc != nil {
-		return c.StdinPipeFunc()
-	}
-	return nil, errors.New("not implemented")
+func (c *Command) StdinPipe() (io.WriteCloser, error) {
+	c.Lock()
+	defer c.Unlock()
+	c.StdinPipeCalled = true
+	c.stdinR, c.stdinW = io.Pipe()
+	c.stdin = c.stdinR
+	return c.stdinW, nil
 }
-func (c *CommandTest) StdoutPipe() (io.Reader, error) {
-	if c.StdoutPipeFunc != nil {
-		return c.StdoutPipeFunc()
-	}
-	return nil, errors.New("not implemented")
+func (c *Command) StdoutPipe() (io.Reader, error) {
+	c.Lock()
+	defer c.Unlock()
+	c.StdoutPipeCalled = true
+	return new(bytes.Buffer), nil
 }
-func (c *CommandTest) StderrPipe() (io.Reader, error) {
-	if c.StderrPipeFunc != nil {
-		return c.StderrPipeFunc()
-	}
-	return nil, errors.New("not implemented")
+func (c *Command) StderrPipe() (io.Reader, error) {
+	c.Lock()
+	defer c.Unlock()
+	c.StderrPipeCalled = true
+	return new(bytes.Buffer), nil
 }

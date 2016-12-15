@@ -128,7 +128,7 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 
 	for _, tcp := range n.TcpHandlers {
 		c := alert.TCPHandlerConfig{
-			Addr: tcp.Address,
+			Address: tcp.Address,
 		}
 		h := alert.NewTCPHandler(c, l)
 		an.handlers = append(an.handlers, h)

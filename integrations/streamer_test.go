@@ -6425,7 +6425,7 @@ stream
 }
 
 func TestStream_AlertSensu(t *testing.T) {
-	ts, err := sensutest.NewServer(1)
+	ts, err := sensutest.NewServer()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6469,7 +6469,7 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
 		got = append(got, g)
 	}
 
@@ -6480,7 +6480,7 @@ stream
 }
 
 func TestStream_AlertSlack(t *testing.T) {
-	ts := slacktest.NewServer(2)
+	ts := slacktest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -6549,7 +6549,7 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
 		got = append(got, g)
 	}
 
@@ -6559,7 +6559,7 @@ stream
 }
 
 func TestStream_AlertTelegram(t *testing.T) {
-	ts := telegramtest.NewServer(2)
+	ts := telegramtest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -6622,7 +6622,67 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
+		got = append(got, g)
+	}
+
+	if err := compareListIgnoreOrder(got, exp, nil); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestStream_AlertTCP(t *testing.T) {
+	ts, err := alerttest.NewTCPServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Close()
+
+	var script = `
+stream
+	|from()
+		.measurement('cpu')
+		.where(lambda: "host" == 'serverA')
+		.groupBy('host')
+	|window()
+		.period(10s)
+		.every(10s)
+	|count('value')
+	|alert()
+		.id('kapacitor.{{ .Name }}.{{ index .Tags "host" }}')
+		.info(lambda: "count" > 6.0)
+		.warn(lambda: "count" > 7.0)
+		.crit(lambda: "count" > 8.0)
+		.details('')
+		.tcp('` + ts.Addr + `')
+`
+	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, nil)
+
+	exp := []interface{}{
+		alert.AlertData{
+			ID:      "kapacitor.cpu.serverA",
+			Message: "kapacitor.cpu.serverA is CRITICAL",
+			Time:    time.Date(1971, 1, 1, 0, 0, 10, 0, time.UTC),
+			Level:   alert.Critical,
+			Data: influxql.Result{
+				Series: imodels.Rows{
+					{
+						Name:    "cpu",
+						Tags:    map[string]string{"host": "serverA"},
+						Columns: []string{"time", "count"},
+						Values: [][]interface{}{[]interface{}{
+							time.Date(1971, 1, 1, 0, 0, 10, 0, time.UTC).Format(time.RFC3339Nano),
+							10.0,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	ts.Close()
+	var got []interface{}
+	for _, g := range ts.Data() {
 		got = append(got, g)
 	}
 
@@ -6632,7 +6692,7 @@ stream
 }
 
 func TestStream_AlertHipChat(t *testing.T) {
-	ts := hipchattest.NewServer(2)
+	ts := hipchattest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -6692,7 +6752,7 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
 		got = append(got, g)
 	}
 
@@ -6702,7 +6762,7 @@ stream
 }
 
 func TestStream_AlertAlerta(t *testing.T) {
-	ts := alertatest.NewServer(2)
+	ts := alertatest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -6776,7 +6836,7 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
 		got = append(got, g)
 	}
 
@@ -6786,7 +6846,7 @@ stream
 }
 
 func TestStream_AlertOpsGenie(t *testing.T) {
-	ts := opsgenietest.NewServer(2)
+	ts := opsgenietest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -6860,7 +6920,7 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
 		got = append(got, g)
 	}
 
@@ -6871,7 +6931,7 @@ stream
 }
 
 func TestStream_AlertPagerDuty(t *testing.T) {
-	ts := pagerdutytest.NewServer(2)
+	ts := pagerdutytest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -6936,7 +6996,65 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
+		got = append(got, g)
+	}
+
+	if err := compareListIgnoreOrder(got, exp, nil); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestStream_AlertPost(t *testing.T) {
+	ts := alerttest.NewPostServer()
+	defer ts.Close()
+
+	var script = `
+stream
+	|from()
+		.measurement('cpu')
+		.where(lambda: "host" == 'serverA')
+		.groupBy('host')
+	|window()
+		.period(10s)
+		.every(10s)
+	|count('value')
+	|alert()
+		.id('kapacitor.{{ .Name }}.{{ index .Tags "host" }}')
+		.info(lambda: "count" > 6.0)
+		.warn(lambda: "count" > 7.0)
+		.crit(lambda: "count" > 8.0)
+		.details('')
+		.post('` + ts.URL + `')
+`
+
+	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, nil)
+
+	exp := []interface{}{
+		alert.AlertData{
+			ID:      "kapacitor.cpu.serverA",
+			Message: "kapacitor.cpu.serverA is CRITICAL",
+			Time:    time.Date(1971, 1, 1, 0, 0, 10, 0, time.UTC),
+			Level:   alert.Critical,
+			Data: influxql.Result{
+				Series: imodels.Rows{
+					{
+						Name:    "cpu",
+						Tags:    map[string]string{"host": "serverA"},
+						Columns: []string{"time", "count"},
+						Values: [][]interface{}{[]interface{}{
+							time.Date(1971, 1, 1, 0, 0, 10, 0, time.UTC).Format(time.RFC3339Nano),
+							10.0,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	ts.Close()
+	var got []interface{}
+	for _, g := range ts.Data() {
 		got = append(got, g)
 	}
 
@@ -6946,7 +7064,7 @@ stream
 }
 
 func TestStream_AlertVictorOps(t *testing.T) {
-	ts := victoropstest.NewServer(2)
+	ts := victoropstest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -7008,7 +7126,7 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
 		got = append(got, g)
 	}
 
@@ -7018,7 +7136,7 @@ stream
 }
 
 func TestStream_AlertTalk(t *testing.T) {
-	ts := talktest.NewServer(1)
+	ts := talktest.NewServer()
 	defer ts.Close()
 
 	var script = `
@@ -7062,7 +7180,7 @@ stream
 
 	ts.Close()
 	var got []interface{}
-	for g := range ts.Requests {
+	for _, g := range ts.Requests() {
 		got = append(got, g)
 	}
 
@@ -7080,8 +7198,8 @@ func TestStream_AlertLog(t *testing.T) {
 	normalPath := filepath.Join(tmpDir, "normal.log")
 	modePath := filepath.Join(tmpDir, "mode.log")
 
-	normal := alerttest.NewLogTest(normalPath)
-	mode := alerttest.NewLogTest(modePath)
+	normal := alerttest.NewLog(normalPath)
+	mode := alerttest.NewLog(modePath)
 
 	var script = fmt.Sprintf(`
 stream
@@ -7126,7 +7244,7 @@ stream
 
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, nil)
 
-	testLog := func(name string, expData []alert.AlertData, expMode os.FileMode, l *alerttest.LogTest) error {
+	testLog := func(name string, expData []alert.AlertData, expMode os.FileMode, l *alerttest.Log) error {
 		m, err := l.Mode()
 		if err != nil {
 			return err
@@ -7193,76 +7311,102 @@ stream
 			},
 		},
 	}
+	expStdin, err := json.Marshal(expAD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Append trailing new line
+	expStdin = append(expStdin, '\n')
 
-	cmdC := make(chan *commandtest.CommandTest, 2)
+	te := alerttest.NewExec()
 	tmInit := func(tm *kapacitor.TaskMaster) {
-		tm.Commander = commandtest.CommanderTest{
-			NewCommandHook: func(c *commandtest.CommandTest) {
-				log.Println("D! command!")
-				cmdC <- c
-			},
-		}
+		tm.Commander = te.Commander
 	}
 
 	testStreamerNoOutput(t, "TestStream_Alert", script, 13*time.Second, tmInit)
 
-	expInfo := []command.CommandInfo{
-		{
-			Prog: "/bin/my-script",
-			Args: []string{"arg1", "arg2"},
+	expCmds := []interface{}{
+		&commandtest.Command{
+			Spec: command.Spec{
+				Prog: "/bin/my-script",
+				Args: []string{"arg1", "arg2"},
+			},
+			Started:   true,
+			Waited:    true,
+			Killed:    false,
+			StdinData: expStdin,
 		},
-		{
-			Prog: "/bin/my-other-script",
-			Args: []string{},
+		&commandtest.Command{
+			Spec: command.Spec{
+				Prog: "/bin/my-other-script",
+				Args: []string{},
+			},
+			Started:   true,
+			Waited:    true,
+			Killed:    false,
+			StdinData: expStdin,
 		},
 	}
 
-	for i := 0; i < 2; i++ {
-		select {
-		case cmd := <-cmdC:
-			cmd.Lock()
-			defer cmd.Unlock()
-
-			var err error
-			for j, info := range expInfo {
-				if got, exp := cmd.Info, info; reflect.DeepEqual(got, exp) {
-					// Found match remove it
-					if j == 0 {
-						expInfo = expInfo[1:]
-					} else {
-						expInfo = expInfo[:1]
-					}
-					err = nil
-					break
-				} else {
-					err = fmt.Errorf("%d unexpected command info:\ngot\n%+v\nexp\n%+v\n", i, got, exp)
-				}
-			}
-			if err != nil {
-				t.Error(err)
-			}
-
-			if !cmd.Started {
-				t.Errorf("%d expected command to have been started", i)
-			}
-			if !cmd.Waited {
-				t.Errorf("%d expected command to have waited", i)
-			}
-			if cmd.Killed {
-				t.Errorf("%d expected command not to have been killed", i)
-			}
-
-			ad := alert.AlertData{}
-			if err := json.Unmarshal(cmd.StdinData, &ad); err != nil {
-				t.Fatal(err)
-			}
-			if got, exp := ad, expAD; !reflect.DeepEqual(got, exp) {
-				t.Errorf("%d unexpected alert data sent to command:\ngot\n%+v\nexp\n%+v\n%s", i, got, exp, string(cmd.StdinData))
-			}
-		default:
-			t.Error("expected command to be created")
-		}
+	cmds := te.Commands()
+	cmdsI := make([]interface{}, len(cmds))
+	for i := range cmds {
+		cmdsI[i] = cmds[i]
 	}
+	if err := compareListIgnoreOrder(cmdsI, expCmds, func(got, exp interface{}) error {
+		g := got.(*commandtest.Command)
+		e := exp.(*commandtest.Command)
+		return e.Compare(g)
+	}); err != nil {
+		t.Error(err)
+	}
+
+	//for i := 0; i < 2; i++ {
+	//	select {
+	//	case cmd := <-cmdC:
+	//		cmd.Lock()
+	//		defer cmd.Unlock()
+
+	//		var err error
+	//		for j, info := range expInfo {
+	//			if got, exp := cmd.Info, info; reflect.DeepEqual(got, exp) {
+	//				// Found match remove it
+	//				if j == 0 {
+	//					expInfo = expInfo[1:]
+	//				} else {
+	//					expInfo = expInfo[:1]
+	//				}
+	//				err = nil
+	//				break
+	//			} else {
+	//				err = fmt.Errorf("%d unexpected command info:\ngot\n%+v\nexp\n%+v\n", i, got, exp)
+	//			}
+	//		}
+	//		if err != nil {
+	//			t.Error(err)
+	//		}
+
+	//		if !cmd.Started {
+	//			t.Errorf("%d expected command to have been started", i)
+	//		}
+	//		if !cmd.Waited {
+	//			t.Errorf("%d expected command to have waited", i)
+	//		}
+	//		if cmd.Killed {
+	//			t.Errorf("%d expected command not to have been killed", i)
+	//		}
+
+	//		ad := alert.AlertData{}
+	//		if err := json.Unmarshal(cmd.StdinData, &ad); err != nil {
+	//			t.Fatal(err)
+	//		}
+	//		if got, exp := ad, expAD; !reflect.DeepEqual(got, exp) {
+	//			t.Errorf("%d unexpected alert data sent to command:\ngot\n%+v\nexp\n%+v\n%s", i, got, exp, string(cmd.StdinData))
+	//		}
+	//	default:
+	//		t.Error("expected command to be created")
+	//	}
+	//}
 }
 
 func TestStream_AlertEmail(t *testing.T) {
@@ -8305,7 +8449,7 @@ func compareListIgnoreOrder(got, exp []interface{}, cmpF func(got, exp interface
 	if cmpF == nil {
 		cmpF = func(got, exp interface{}) error {
 			if !reflect.DeepEqual(got, exp) {
-				return fmt.Errorf("\ngot\n%v\nexp\n%v\n", got, exp)
+				return fmt.Errorf("\ngot\n%+v\nexp\n%+v\n", got, exp)
 			}
 			return nil
 		}

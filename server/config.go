@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/influxdata/kapacitor/command"
 	"github.com/influxdata/kapacitor/services/alert"
 	"github.com/influxdata/kapacitor/services/alerta"
 	"github.com/influxdata/kapacitor/services/config"
@@ -82,12 +83,15 @@ type Config struct {
 	DataDir                string `toml:"data_dir"`
 	SkipConfigOverrides    bool   `toml:"skip-config-overrides"`
 	DefaultRetentionPolicy string `toml:"default-retention-policy"`
+
+	Commander command.Commander `toml:"-"`
 }
 
 // NewConfig returns an instance of Config with reasonable defaults.
 func NewConfig() *Config {
 	c := &Config{
-		Hostname: "localhost",
+		Hostname:  "localhost",
+		Commander: command.ExecCommander,
 	}
 
 	c.HTTP = httpd.NewConfig()

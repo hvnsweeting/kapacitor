@@ -180,7 +180,6 @@ func NewTaskMaster(id string, l LogService) *TaskMaster {
 		logger:         l.NewLogger(fmt.Sprintf("[task_master:%s] ", id), log.LstdFlags),
 		closed:         true,
 		TimingService:  noOpTimingService{},
-		Commander:      command.ExecCommander,
 	}
 }
 

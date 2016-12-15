@@ -176,7 +176,7 @@ func (u *UDFNode) snapshot() ([]byte, error) {
 type UDFProcess struct {
 	server    *udf.Server
 	commander command.Commander
-	cmdInfo   command.CommandInfo
+	cmdSpec   command.Spec
 	cmd       command.Command
 
 	stderr io.Reader
@@ -194,14 +194,14 @@ type UDFProcess struct {
 
 func NewUDFProcess(
 	commander command.Commander,
-	cmdInfo command.CommandInfo,
+	cmdSpec command.Spec,
 	l *log.Logger,
 	timeout time.Duration,
 	abortCallback func(),
 ) *UDFProcess {
 	return &UDFProcess{
 		commander:     commander,
-		cmdInfo:       cmdInfo,
+		cmdSpec:       cmdSpec,
 		logger:        l,
 		timeout:       timeout,
 		abortCallback: abortCallback,
@@ -213,7 +213,7 @@ func (p *UDFProcess) Open() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	cmd := p.commander.NewCommand(p.cmdInfo)
+	cmd := p.commander.NewCommand(p.cmdSpec)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

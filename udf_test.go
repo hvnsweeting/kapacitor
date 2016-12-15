@@ -28,7 +28,7 @@ func newUDFProcess(name string) (*kapacitor.UDFProcess, *udf_test.IO) {
 	uio := udf_test.NewIO()
 	cmd := newTestCommander(uio)
 	l := log.New(os.Stderr, fmt.Sprintf("[%s] ", name), log.LstdFlags)
-	u := kapacitor.NewUDFProcess(cmd, command.CommandInfo{}, l, 0, nil)
+	u := kapacitor.NewUDFProcess(cmd, command.Spec{}, l, 0, nil)
 	return u, uio
 }
 
@@ -237,7 +237,7 @@ func newTestCommander(uio *udf_test.IO) command.Commander {
 	}
 }
 
-func (c *testCommander) NewCommand(ci command.CommandInfo) command.Command {
+func (c *testCommander) NewCommand(command.Spec) command.Command {
 	return c
 }
 

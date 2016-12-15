@@ -18,6 +18,7 @@ import (
 	"github.com/influxdata/influxdb/services/opentsdb"
 	"github.com/influxdata/kapacitor"
 	"github.com/influxdata/kapacitor/auth"
+	"github.com/influxdata/kapacitor/command"
 	iclient "github.com/influxdata/kapacitor/influxdb"
 	"github.com/influxdata/kapacitor/services/alert"
 	"github.com/influxdata/kapacitor/services/alerta"
@@ -69,6 +70,8 @@ type Server struct {
 	config *Config
 
 	err chan error
+
+	Commander command.Commander
 
 	TaskMaster       *kapacitor.TaskMaster
 	TaskMasterLookup *kapacitor.TaskMasterLookup
@@ -128,6 +131,7 @@ func New(c *Config, buildInfo BuildInfo, logService logging.Interface) (*Server,
 		Logger:          l,
 		ServicesByName:  make(map[string]int),
 		DynamicServices: make(map[string]Updater),
+		Commander:       c.Commander,
 	}
 	s.Logger.Println("I! Kapacitor hostname:", s.hostname)
 
@@ -149,6 +153,7 @@ func New(c *Config, buildInfo BuildInfo, logService logging.Interface) (*Server,
 	s.TaskMasterLookup = kapacitor.NewTaskMasterLookup()
 	s.TaskMaster = kapacitor.NewTaskMaster(kapacitor.MainTaskMaster, logService)
 	s.TaskMaster.DefaultRetentionPolicy = c.DefaultRetentionPolicy
+	s.TaskMaster.Commander = s.Commander
 	s.TaskMasterLookup.Set(s.TaskMaster)
 	if err := s.TaskMaster.Open(); err != nil {
 		return nil, err
@@ -250,6 +255,7 @@ func (s *Server) appendAlertService() {
 	l := s.LogService.NewLogger("[alert] ", log.LstdFlags)
 	srv := alert.NewService(s.config.Alert, l)
 
+	srv.Commander = s.Commander
 	srv.HTTPDService = s.HTTPDService
 
 	s.AlertService = srv

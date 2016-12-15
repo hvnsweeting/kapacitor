@@ -9,13 +9,12 @@ import (
 type Server struct {
 	ts       *httptest.Server
 	URL      string
-	requests chan Request
-	Requests <-chan Request
+	requests []Request
 	closed   bool
 }
 
-func NewServer(count int) *Server {
-	requests := make(chan Request, count)
+func NewServer() *Server {
+	s := new(Server)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ar := Request{
 			URL:           r.URL.String(),
@@ -23,24 +22,22 @@ func NewServer(count int) *Server {
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.Decode(&ar.PostData)
-		requests <- ar
+		s.requests = append(s.requests, ar)
 		w.WriteHeader(http.StatusCreated)
 	}))
-	return &Server{
-		ts:       ts,
-		URL:      ts.URL,
-		requests: requests,
-		Requests: requests,
-	}
+	s.ts = ts
+	s.URL = ts.URL
+	return s
 }
-
+func (s *Server) Requests() []Request {
+	return s.requests
+}
 func (s *Server) Close() {
 	if s.closed {
 		return
 	}
 	s.closed = true
 	s.ts.Close()
-	close(s.requests)
 }
 
 type Request struct {

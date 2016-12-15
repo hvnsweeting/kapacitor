@@ -19,8 +19,8 @@ type Command interface {
 	Kill()
 }
 
-// CommandInfo contains the necessary information to create a new command.
-type CommandInfo struct {
+// Spec contains the necessary information to create a new command.
+type Spec struct {
 	Prog string
 	Args []string
 	Env  []string
@@ -28,7 +28,7 @@ type CommandInfo struct {
 
 // Commander creates new commands.
 type Commander interface {
-	NewCommand(ci CommandInfo) Command
+	NewCommand(Spec) Command
 }
 
 // ExecCommander implements Commander using the stdlib os/exec package.
@@ -38,9 +38,9 @@ type execCommander struct{}
 var ExecCommander = execCommander{}
 
 // Create a new Command using golang exec package and the information.
-func (execCommander) NewCommand(ci CommandInfo) Command {
-	c := exec.Command(ci.Prog, ci.Args...)
-	c.Env = ci.Env
+func (execCommander) NewCommand(s Spec) Command {
+	c := exec.Command(s.Prog, s.Args...)
+	c.Env = s.Env
 	return execCmd{c}
 }
 

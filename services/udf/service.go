@@ -81,14 +81,14 @@ func (s *Service) Create(
 		for k, v := range conf.Env {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
-		cmdInfo := command.CommandInfo{
+		cmdSpec := command.Spec{
 			Prog: conf.Prog,
 			Args: conf.Args,
 			Env:  env,
 		}
 		return kapacitor.NewUDFProcess(
 			command.ExecCommander,
-			cmdInfo,
+			cmdSpec,
 			l,
 			time.Duration(conf.Timeout),
 			abortCallback,
