@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 
@@ -52,13 +51,6 @@ type Override struct {
 	Create bool `json:"create"`
 }
 
-// versionWrapper wraps a structure with a version so that changes
-// to the structure can be properly decoded.
-type versionWrapper struct {
-	Version int              `json:"version"`
-	Value   *json.RawMessage `json:"value"`
-}
-
 const (
 	overrideDataPrefix    = "/overrides/data/"
 	overrideIndexesPrefix = "/overrides/indexes/"
@@ -79,34 +71,15 @@ func newOverrideKV(store storage.Interface) *overrideKV {
 }
 
 func encodeOverride(o Override) ([]byte, error) {
-	raw, err := json.Marshal(o)
-	if err != nil {
-		return nil, err
-	}
-	rawCopy := make(json.RawMessage, len(raw))
-	copy(rawCopy, raw)
-	wrapper := versionWrapper{
-		Version: version,
-		Value:   &rawCopy,
-	}
-	return json.Marshal(wrapper)
+	return storage.VersionJSONEncode(version, o)
 }
 
-func decodeOverride(data []byte) (Override, error) {
-	var wrapper versionWrapper
-	err := json.Unmarshal(data, &wrapper)
-	if err != nil {
-		return Override{}, err
-	}
-	var override Override
-	if wrapper.Value == nil {
-		return Override{}, errors.New("empty override")
-	}
-	dec := json.NewDecoder(bytes.NewReader(*wrapper.Value))
-	// Do not convert all nums to float64, rather use json.Number which is a Stringer
-	dec.UseNumber()
-	err = dec.Decode(&override)
-	return override, err
+func decodeOverride(data []byte) (o Override, err error) {
+	err = storage.VersionJSONDecode(data, func(version int, dec *json.Decoder) error {
+		dec.UseNumber()
+		return dec.Decode(&o)
+	})
+	return o, err
 }
 
 // Create a key for the override data

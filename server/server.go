@@ -257,6 +257,7 @@ func (s *Server) appendAlertService() {
 
 	srv.Commander = s.Commander
 	srv.HTTPDService = s.HTTPDService
+	srv.StorageService = s.StorageService
 
 	s.AlertService = srv
 	s.TaskMaster.AlertService = srv

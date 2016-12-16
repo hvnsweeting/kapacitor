@@ -6833,6 +6833,17 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 			t.Errorf("unexpected handler put:\ngot\n%#v\nexp\n%#v\n", h, tc.expPut)
 		}
 
+		// Restart server
+		s.Restart()
+
+		rh, err := cli.Handler(h.Link)
+		if err != nil {
+			t.Fatalf("could not find handler after restart: %v", err)
+		}
+		if got, exp := rh, h; !reflect.DeepEqual(got, exp) {
+			t.Errorf("unexpected handler after restart:\ngot\n%#v\nexp\n%#v\n", got, exp)
+		}
+
 		err = cli.DeleteHandler(h.Link)
 		if err != nil {
 			t.Fatal(err)

@@ -21,6 +21,7 @@ import (
 	"github.com/influxdata/kapacitor/services/pagerduty"
 	"github.com/influxdata/kapacitor/services/slack"
 	"github.com/influxdata/kapacitor/services/smtp"
+	"github.com/influxdata/kapacitor/services/storage"
 	"github.com/influxdata/kapacitor/services/telegram"
 	"github.com/influxdata/kapacitor/services/victorops"
 	"github.com/mitchellh/mapstructure"
@@ -57,26 +58,15 @@ type handler struct {
 	Handler alert.Handler
 }
 
-// HandlerSpec provides all the necessary information to create a handler.
-type HandlerSpec struct {
-	ID      string              `json:"id"`
-	Topics  []string            `json:"topics"`
-	Actions []HandlerActionSpec `json:"actions"`
-}
-
-// HandlerActionSpec defines an action an handler can take.
-type HandlerActionSpec struct {
-	Kind    string                 `json:"kind"`
-	Options map[string]interface{} `json:"options"`
-}
-
-type HandlerAction interface {
+type handlerAction interface {
 	Handle(event alert.Event)
 	SetNext(h alert.Handler)
 }
 
 type Service struct {
 	mu sync.RWMutex
+
+	specs HandlerSpecDAO
 
 	handlers map[string]handler
 
@@ -86,6 +76,9 @@ type Service struct {
 	HTTPDService interface {
 		AddRoutes([]httpd.Route) error
 		DelRoutes([]httpd.Route)
+	}
+	StorageService interface {
+		Store(namespace string) storage.Interface
 	}
 
 	Commander command.Commander
@@ -134,9 +127,21 @@ func NewService(c Config, l *log.Logger) *Service {
 	return s
 }
 
+// The storage namespace for all task data.
+const alertNamespace = "alert_store"
+
 func (s *Service) Open() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Create DAO
+	store := s.StorageService.Store(alertNamespace)
+	s.specs = newHandlerSpecKV(store)
+
+	// Load saved handlers
+	if err := s.loadSavedHandlerSpecs(); err != nil {
+		return err
+	}
 
 	// Define API routes
 	s.routes = []httpd.Route{
@@ -194,6 +199,29 @@ func (s *Service) Open() error {
 	}
 
 	return s.HTTPDService.AddRoutes(s.routes)
+}
+
+func (s *Service) loadSavedHandlerSpecs() error {
+	offset := 0
+	limit := 100
+	for {
+		specs, err := s.specs.List("", offset, limit)
+		if err != nil {
+			return err
+		}
+
+		for _, spec := range specs {
+			if err := s.loadHandlerSpec(spec); err != nil {
+				s.logger.Println("E! failed to load handler on startup", err)
+			}
+		}
+
+		offset += limit
+		if len(specs) != limit {
+			break
+		}
+	}
+	return nil
 }
 
 func (s *Service) Close() error {
@@ -423,7 +451,7 @@ func (s *Service) handleCreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = s.RegisterHandlerSpec(handlerSpec)
 	if err != nil {
-		httpd.HttpError(w, fmt.Sprint("failed to create handler: ", err.Error()), true, http.StatusBadRequest)
+		httpd.HttpError(w, fmt.Sprint("failed to create handler: ", err.Error()), true, http.StatusInternalServerError)
 		return
 	}
 
@@ -469,7 +497,7 @@ func (s *Service) handlePatchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.ReplaceHandlerSpec(h.Spec, newSpec); err != nil {
-		httpd.HttpError(w, fmt.Sprint("failed to update handler: ", err.Error()), true, http.StatusBadRequest)
+		httpd.HttpError(w, fmt.Sprint("failed to update handler: ", err.Error()), true, http.StatusInternalServerError)
 		return
 	}
 
@@ -497,7 +525,7 @@ func (s *Service) handlePutHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.ReplaceHandlerSpec(h.Spec, newSpec); err != nil {
-		httpd.HttpError(w, fmt.Sprint("failed to update handler: ", err.Error()), true, http.StatusBadRequest)
+		httpd.HttpError(w, fmt.Sprint("failed to update handler: ", err.Error()), true, http.StatusInternalServerError)
 		return
 	}
 
@@ -509,7 +537,10 @@ func (s *Service) handlePutHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, handlersBasePathAnchored)
-	s.DeregisterHandlerSpec(id)
+	if err := s.DeregisterHandlerSpec(id); err != nil {
+		httpd.HttpError(w, fmt.Sprint("failed to delete handler: ", err.Error()), true, http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -552,6 +583,20 @@ func (s *Service) DeregisterHandler(topics []string, h alert.Handler) {
 	s.topics.DeregisterHandler(topics, h)
 }
 
+// loadHandlerSpec initializes a spec that already exists.
+// Caller must have the write lock.
+func (s *Service) loadHandlerSpec(spec HandlerSpec) error {
+	h, err := s.createHandlerFromSpec(spec)
+	if err != nil {
+		return err
+	}
+
+	s.handlers[spec.ID] = h
+
+	s.topics.RegisterHandler(spec.Topics, h.Handler)
+	return nil
+}
+
 func (s *Service) RegisterHandlerSpec(spec HandlerSpec) error {
 	s.mu.RLock()
 	_, ok := s.handlers[spec.ID]
@@ -559,8 +604,14 @@ func (s *Service) RegisterHandlerSpec(spec HandlerSpec) error {
 	if ok {
 		return fmt.Errorf("cannot register handler, handler with ID %q already exists", spec.ID)
 	}
+
 	h, err := s.createHandlerFromSpec(spec)
 	if err != nil {
+		return err
+	}
+
+	// Persist handler spec
+	if err := s.specs.Create(spec); err != nil {
 		return err
 	}
 
@@ -572,15 +623,23 @@ func (s *Service) RegisterHandlerSpec(spec HandlerSpec) error {
 	return nil
 }
 
-func (s *Service) DeregisterHandlerSpec(id string) {
-	s.mu.Lock()
+func (s *Service) DeregisterHandlerSpec(id string) error {
+	s.mu.RLock()
 	h, ok := s.handlers[id]
-	delete(s.handlers, id)
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
 	if ok {
+		// Delete handler spec
+		if err := s.specs.Delete(id); err != nil {
+			return err
+		}
 		s.topics.DeregisterHandler(h.Spec.Topics, h.Handler)
+
+		s.mu.Lock()
+		delete(s.handlers, id)
+		s.mu.Unlock()
 	}
+	return nil
 }
 
 func (s *Service) ReplaceHandlerSpec(oldSpec, newSpec HandlerSpec) error {
@@ -589,8 +648,25 @@ func (s *Service) ReplaceHandlerSpec(oldSpec, newSpec HandlerSpec) error {
 		return err
 	}
 
-	s.mu.Lock()
+	s.mu.RLock()
 	oldH := s.handlers[oldSpec.ID]
+	s.mu.RUnlock()
+
+	// Persist new handler specs
+	if newSpec.ID == oldSpec.ID {
+		if err := s.specs.Replace(newSpec); err != nil {
+			return err
+		}
+	} else {
+		if err := s.specs.Create(newSpec); err != nil {
+			return err
+		}
+		if err := s.specs.Delete(oldSpec.ID); err != nil {
+			return err
+		}
+	}
+
+	s.mu.Lock()
 	delete(s.handlers, oldSpec.ID)
 	s.handlers[newSpec.ID] = newH
 	s.mu.Unlock()
@@ -642,7 +718,7 @@ func (s *Service) createHandlerFromSpec(spec HandlerSpec) (handler, error) {
 	}
 
 	// Create actions chained together in a singly linked list
-	var prev, first HandlerAction
+	var prev, first handlerAction
 	for _, actionSpec := range spec.Actions {
 		curr, err := s.createHandlerActionFromSpec(actionSpec)
 		if err != nil {
@@ -679,7 +755,7 @@ func decodeOptions(options map[string]interface{}, c interface{}) error {
 	return nil
 }
 
-func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha HandlerAction, err error) {
+func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha handlerAction, err error) {
 	switch spec.Kind {
 	case "alerta":
 		c := s.AlertaService.DefaultHandlerConfig()
