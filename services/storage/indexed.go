@@ -218,7 +218,7 @@ func (c *IndexedStore) put(o BinaryObject, allowReplace, requireReplace bool) er
 
 func (c *IndexedStore) Delete(id string) error {
 	o, err := c.Get(id)
-	if err != ErrNoObjectExists {
+	if err == ErrNoObjectExists {
 		// Nothing to do
 		return nil
 	} else if err != nil {

@@ -137,6 +137,24 @@ type Task struct {
 	LastEnabled time.Time
 }
 
+type rawTask Task
+
+func (t Task) ObjectID() string {
+	return t.ID
+}
+
+func (t Task) MarshalBinary() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(rawTask(t))
+	return buf.Bytes(), err
+}
+
+func (t *Task) UnmarshalBinary(data []byte) error {
+	dec := gob.NewDecoder(bytes.NewReader(data))
+	return dec.Decode((*rawTask)(t))
+}
+
 type Template struct {
 	// Unique identifier for the task
 	ID string
@@ -161,161 +179,69 @@ type Snapshot struct {
 	NodeSnapshots map[string][]byte
 }
 
-const (
-	taskDataPrefix    = "/tasks/data/"
-	taskIndexesPrefix = "/tasks/indexes/"
-
-	// Name of ID index
-	idIndex = "id/"
-)
-
 // Key/Value store based implementation of the TaskDAO
 type taskKV struct {
-	store storage.Interface
+	store *storage.IndexedStore
 }
 
-func newTaskKV(store storage.Interface) *taskKV {
-	return &taskKV{
-		store: store,
-	}
-}
-
-func (d *taskKV) encodeTask(t Task) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	err := enc.Encode(t)
-	return buf.Bytes(), err
-}
-
-func (d *taskKV) decodeTask(data []byte) (Task, error) {
-	var task Task
-	dec := gob.NewDecoder(bytes.NewReader(data))
-	err := dec.Decode(&task)
-	return task, err
-}
-
-// Create a key for the task data
-func (d *taskKV) taskDataKey(id string) string {
-	return taskDataPrefix + id
-}
-
-// Create a key for a given index and value.
-//
-// Indexes are maintained via a 'directory' like system:
-//
-// /tasks/data/ID -- contains encoded task data
-// /tasks/index/id/ID -- contains the task ID
-//
-// As such to list all tasks in ID sorted order use the /tasks/index/id/ directory.
-func (d *taskKV) taskIndexKey(index, value string) string {
-	return taskIndexesPrefix + index + value
-}
-
-func (d *taskKV) Get(id string) (Task, error) {
-	key := d.taskDataKey(id)
-	if exists, err := d.store.Exists(key); err != nil {
-		return Task{}, err
-	} else if !exists {
-		return Task{}, ErrNoTaskExists
-	}
-	kv, err := d.store.Get(key)
-	if err != nil {
-		return Task{}, err
-	}
-	return d.decodeTask(kv.Value)
-}
-
-func (d *taskKV) Create(t Task) error {
-	key := d.taskDataKey(t.ID)
-
-	exists, err := d.store.Exists(key)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return ErrTaskExists
-	}
-
-	data, err := d.encodeTask(t)
-	if err != nil {
-		return err
-	}
-	// Put data
-	err = d.store.Put(key, data)
-	if err != nil {
-		return err
-	}
-	// Put ID index
-	indexKey := d.taskIndexKey(idIndex, t.ID)
-	return d.store.Put(indexKey, []byte(t.ID))
-}
-
-func (d *taskKV) Replace(t Task) error {
-	key := d.taskDataKey(t.ID)
-
-	exists, err := d.store.Exists(key)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNoTaskExists
-	}
-
-	data, err := d.encodeTask(t)
-	if err != nil {
-		return err
-	}
-	// Put data
-	err = d.store.Put(key, data)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (d *taskKV) Delete(id string) error {
-	key := d.taskDataKey(id)
-	indexKey := d.taskIndexKey(idIndex, id)
-
-	dataErr := d.store.Delete(key)
-	indexErr := d.store.Delete(indexKey)
-	if dataErr != nil {
-		return dataErr
-	}
-	return indexErr
-}
-
-func (d *taskKV) List(pattern string, offset, limit int) ([]Task, error) {
-	// Tasks are indexed via their ID only.
-	// While tasks are sorted in the data section by their ID anyway
-	// this allows us to do offset/limits and filtering without having to read in all task data.
-
-	// List all task ids sorted by ID
-	ids, err := d.store.List(taskIndexesPrefix + idIndex)
+func newTaskKV(store storage.Interface) (*taskKV, error) {
+	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
+		return new(Task)
+	})
+	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err
 	}
+	return &taskKV{
+		store: istore,
+	}, nil
+}
 
-	var match func([]byte) bool
-	if pattern != "" {
-		match = func(value []byte) bool {
-			id := string(value)
-			matched, _ := path.Match(pattern, id)
-			return matched
-		}
-	} else {
-		match = func([]byte) bool { return true }
+func (kv *taskKV) error(err error) error {
+	if err == storage.ErrObjectExists {
+		return ErrTaskExists
+	} else if err == storage.ErrNoObjectExists {
+		return ErrNoTaskExists
 	}
-	matches := storage.DoListFunc(ids, match, offset, limit)
+	return err
+}
 
-	tasks := make([]Task, len(matches))
-	for i, id := range matches {
-		data, err := d.store.Get(d.taskDataKey(string(id)))
-		if err != nil {
-			return nil, err
+func (kv *taskKV) Get(id string) (Task, error) {
+	o, err := kv.store.Get(id)
+	if err != nil {
+		return Task{}, kv.error(err)
+	}
+	t, ok := o.(*Task)
+	if !ok {
+		return Task{}, fmt.Errorf("impossible error, object not a Task, got %T", o)
+	}
+	return *t, nil
+}
+
+func (kv *taskKV) Create(t Task) error {
+	return kv.store.Create(&t)
+}
+
+func (kv *taskKV) Replace(t Task) error {
+	return kv.store.Replace(&t)
+}
+
+func (kv *taskKV) Delete(id string) error {
+	return kv.store.Delete(id)
+}
+
+func (kv *taskKV) List(pattern string, offset, limit int) ([]Task, error) {
+	objects, err := kv.store.List(storage.DefaultIDIndex, pattern, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]Task, len(objects))
+	for i, o := range objects {
+		t, ok := o.(*Task)
+		if !ok {
+			return nil, fmt.Errorf("impossible error, object not a Task, got %T", o)
 		}
-		t, err := d.decodeTask(data.Value)
-		tasks[i] = t
+		tasks[i] = *t
 	}
 	return tasks, nil
 }
@@ -325,6 +251,8 @@ const (
 	templateIndexesPrefix = "/templates/indexes/"
 	// Associate tasks with a template
 	templateTaskPrefix = "/templates/tasks/"
+
+	idIndex = "id/"
 )
 
 // Key/Value store based implementation of the TemplateDAO

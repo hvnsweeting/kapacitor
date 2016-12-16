@@ -76,13 +76,16 @@ const taskNamespace = "task_store"
 func (ts *Service) Open() error {
 	// Create DAO
 	store := ts.StorageService.Store(taskNamespace)
-	ts.tasks = newTaskKV(store)
+	tasksDAO, err := newTaskKV(store)
+	if err != nil {
+		return err
+	}
+	ts.tasks = tasksDAO
 	ts.templates = newTemplateKV(store)
 	ts.snapshots = newSnapshotKV(store)
 
 	// Perform migration to new storage service.
-	err := ts.migrate()
-	if err != nil {
+	if err := ts.migrate(); err != nil {
 		return err
 	}
 

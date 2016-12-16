@@ -249,7 +249,6 @@ func (s *Service) loadSavedTopicStates() error {
 		}
 
 		for _, ts := range topicStates {
-			log.Println("D! TS", ts)
 			s.topics.RestoreTopic(ts.Topic, s.convertEventStatesToAlert(ts.EventStates))
 		}
 
@@ -660,7 +659,6 @@ func (s *Service) Collect(event alert.Event) error {
 		Topic:       event.Topic,
 		EventStates: s.convertEventStatesFromAlert(t.EventStates(alert.OK)),
 	}
-	log.Println("D! TS", ts)
 	return s.topicsDAO.Put(ts)
 }
 
@@ -865,7 +863,6 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha handle
 		c := alert.ExecHandlerConfig{
 			Commander: s.Commander,
 		}
-		log.Println("D! exec config", c)
 		err = decodeOptions(spec.Options, &c)
 		if err != nil {
 			return

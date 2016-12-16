@@ -46,6 +46,7 @@ import (
 	"github.com/influxdata/kapacitor/services/slack/slacktest"
 	"github.com/influxdata/kapacitor/services/smtp"
 	"github.com/influxdata/kapacitor/services/smtp/smtptest"
+	"github.com/influxdata/kapacitor/services/storage/storagetest"
 	"github.com/influxdata/kapacitor/services/talk"
 	"github.com/influxdata/kapacitor/services/talk/talktest"
 	"github.com/influxdata/kapacitor/services/telegram"
@@ -57,7 +58,6 @@ import (
 	"github.com/influxdata/wlog"
 )
 
-var httpService *httpd.Service
 var logService = loggingtest.New()
 
 var dbrps = []kapacitor.DBRP{
@@ -72,11 +72,6 @@ func init() {
 	// create API server
 	config := httpd.NewConfig()
 	config.BindAddress = ":0" // Choose port dynamically
-	httpService = httpd.NewService(config, "localhost", logService.NewLogger("[http] ", log.LstdFlags), logService)
-	err := httpService.Open()
-	if err != nil {
-		panic(err)
-	}
 }
 
 func TestStream_Derivative(t *testing.T) {
@@ -8057,7 +8052,7 @@ stream
 
 	// Create a new execution env
 	tm := kapacitor.NewTaskMaster("testStreamer", logService)
-	tm.HTTPDService = httpService
+	tm.HTTPDService = newHTTPDService()
 	tm.TaskStore = taskStore{}
 	tm.DeadmanService = deadman{}
 	tm.InfluxDBService = influxdb
@@ -8117,7 +8112,7 @@ stream
 
 	// Create a new execution env
 	tm := kapacitor.NewTaskMaster("testStreamer", logService)
-	tm.HTTPDService = httpService
+	tm.HTTPDService = newHTTPDService()
 	tm.TaskStore = taskStore{}
 	tm.DeadmanService = deadman{}
 	tm.InfluxDBService = influxdb
@@ -8320,10 +8315,17 @@ func testStreamer(
 
 	// Create a new execution env
 	tm := kapacitor.NewTaskMaster("testStreamer", logService)
-	tm.HTTPDService = httpService
+	httpdService := newHTTPDService()
+	tm.HTTPDService = httpdService
 	tm.TaskStore = taskStore{}
 	tm.DeadmanService = deadman{}
-	tm.AlertService = alertservice.NewService(alertservice.NewConfig(), logService.NewLogger("[alert] ", log.LstdFlags))
+	as := alertservice.NewService(alertservice.NewConfig(), logService.NewLogger("[alert] ", log.LstdFlags))
+	as.StorageService = storagetest.New()
+	as.HTTPDService = httpdService
+	if err := as.Open(); err != nil {
+		t.Fatal(err)
+	}
+	tm.AlertService = as
 	if tmInit != nil {
 		tmInit(tm)
 	}

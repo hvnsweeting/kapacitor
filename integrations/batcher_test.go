@@ -19,6 +19,7 @@ import (
 	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/clock"
 	alertservice "github.com/influxdata/kapacitor/services/alert"
+	"github.com/influxdata/kapacitor/services/storage/storagetest"
 	"github.com/influxdata/wlog"
 )
 
@@ -26,7 +27,7 @@ func TestBatch_InvalidQuery(t *testing.T) {
 
 	// Create a new execution env
 	tm := kapacitor.NewTaskMaster("invalidQuery", logService)
-	tm.HTTPDService = httpService
+	tm.HTTPDService = newHTTPDService()
 	tm.TaskStore = taskStore{}
 	tm.DeadmanService = deadman{}
 	tm.Open()
@@ -2336,10 +2337,17 @@ func testBatcher(t *testing.T, name, script string) (clock.Setter, *kapacitor.Ex
 
 	// Create a new execution env
 	tm := kapacitor.NewTaskMaster("testBatcher", logService)
-	tm.HTTPDService = httpService
+	httpdService := newHTTPDService()
+	tm.HTTPDService = httpdService
 	tm.TaskStore = taskStore{}
 	tm.DeadmanService = deadman{}
-	tm.AlertService = alertservice.NewService(alertservice.NewConfig(), logService.NewLogger("[alert] ", log.LstdFlags))
+	as := alertservice.NewService(alertservice.NewConfig(), logService.NewLogger("[alert] ", log.LstdFlags))
+	as.StorageService = storagetest.New()
+	as.HTTPDService = httpdService
+	if err := as.Open(); err != nil {
+		t.Fatal(err)
+	}
+	tm.AlertService = as
 	tm.Open()
 
 	// Create task

@@ -13,9 +13,22 @@ import (
 	"github.com/influxdata/kapacitor"
 	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/influxdb"
+	"github.com/influxdata/kapacitor/services/httpd"
 	k8s "github.com/influxdata/kapacitor/services/k8s/client"
 	"github.com/influxdata/kapacitor/udf"
 )
+
+func newHTTPDService() *httpd.Service {
+	// create API server
+	config := httpd.NewConfig()
+	config.BindAddress = ":0" // Choose port dynamically
+	httpService := httpd.NewService(config, "localhost", logService.NewLogger("[http] ", log.LstdFlags), logService)
+	err := httpService.Open()
+	if err != nil {
+		panic(err)
+	}
+	return httpService
+}
 
 type MockInfluxDBService struct {
 	ts *httptest.Server
