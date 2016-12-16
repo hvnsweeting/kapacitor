@@ -72,7 +72,7 @@ type TaskMaster struct {
 		Collect(event alert.Event) error
 		RegisterHandler(topics []string, h alert.Handler)
 		DeregisterHandler(topics []string, h alert.Handler)
-		DeleteTopic(topic string)
+		DeleteTopic(topic string) error
 	}
 	InfluxDBService interface {
 		NewNamedClient(name string) (influxdb.Client, error)

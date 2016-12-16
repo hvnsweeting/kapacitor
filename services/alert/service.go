@@ -66,7 +66,8 @@ type handlerAction interface {
 type Service struct {
 	mu sync.RWMutex
 
-	specs HandlerSpecDAO
+	specsDAO  HandlerSpecDAO
+	topicsDAO TopicStateDAO
 
 	handlers map[string]handler
 
@@ -136,10 +137,24 @@ func (s *Service) Open() error {
 
 	// Create DAO
 	store := s.StorageService.Store(alertNamespace)
-	s.specs = newHandlerSpecKV(store)
+	specsDAO, err := newHandlerSpecKV(store)
+	if err != nil {
+		return err
+	}
+	s.specsDAO = specsDAO
+	topicsDAO, err := newTopicStateKV(store)
+	if err != nil {
+		return err
+	}
+	s.topicsDAO = topicsDAO
 
 	// Load saved handlers
 	if err := s.loadSavedHandlerSpecs(); err != nil {
+		return err
+	}
+
+	// Load saved topic state
+	if err := s.loadSavedTopicStates(); err != nil {
 		return err
 	}
 
@@ -205,7 +220,7 @@ func (s *Service) loadSavedHandlerSpecs() error {
 	offset := 0
 	limit := 100
 	for {
-		specs, err := s.specs.List("", offset, limit)
+		specs, err := s.specsDAO.List("", offset, limit)
 		if err != nil {
 			return err
 		}
@@ -218,6 +233,28 @@ func (s *Service) loadSavedHandlerSpecs() error {
 
 		offset += limit
 		if len(specs) != limit {
+			break
+		}
+	}
+	return nil
+}
+
+func (s *Service) loadSavedTopicStates() error {
+	offset := 0
+	limit := 100
+	for {
+		topicStates, err := s.topicsDAO.List("", offset, limit)
+		if err != nil {
+			return err
+		}
+
+		for _, ts := range topicStates {
+			log.Println("D! TS", ts)
+			s.topics.RestoreTopic(ts.Topic, s.convertEventStatesToAlert(ts.EventStates))
+		}
+
+		offset += limit
+		if len(topicStates) != limit {
 			break
 		}
 	}
@@ -275,7 +312,10 @@ func pathMatch(pattern, p string) (match bool) {
 func (s *Service) handleDeleteTopic(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, topicsBasePathAnchored)
 	id := s.topicIDFromPath(p)
-	s.DeleteTopic(id)
+	if err := s.DeleteTopic(id); err != nil {
+		httpd.HttpError(w, fmt.Sprintf("failed to delete topic %q: %v", id, err), true, http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -336,7 +376,44 @@ func (s *Service) handleTopic(t *alert.Topic, w http.ResponseWriter, r *http.Req
 	w.Write(httpd.MarshalJSON(topic, true))
 }
 
-func (s *Service) convertEventState(state alert.EventState) client.EventState {
+func (s *Service) convertEventStatesFromAlert(states map[string]alert.EventState) map[string]EventState {
+	newStates := make(map[string]EventState, len(states))
+	for id, state := range states {
+		newStates[id] = s.convertEventStateFromAlert(state)
+	}
+	return newStates
+}
+
+func (s *Service) convertEventStatesToAlert(states map[string]EventState) map[string]alert.EventState {
+	newStates := make(map[string]alert.EventState, len(states))
+	for id, state := range states {
+		newStates[id] = s.convertEventStateToAlert(id, state)
+	}
+	return newStates
+}
+
+func (s *Service) convertEventStateFromAlert(state alert.EventState) EventState {
+	return EventState{
+		Message:  state.Message,
+		Details:  state.Details,
+		Time:     state.Time,
+		Duration: state.Duration,
+		Level:    state.Level,
+	}
+}
+
+func (s *Service) convertEventStateToAlert(id string, state EventState) alert.EventState {
+	return alert.EventState{
+		ID:       id,
+		Message:  state.Message,
+		Details:  state.Details,
+		Time:     state.Time,
+		Duration: state.Duration,
+		Level:    state.Level,
+	}
+}
+
+func (s *Service) convertEventStateToClient(state alert.EventState) client.EventState {
 	return client.EventState{
 		Message:  state.Message,
 		Details:  state.Details,
@@ -370,7 +447,7 @@ func (s *Service) handleListTopicEvents(t *alert.Topic, w http.ResponseWriter, r
 		httpd.HttpError(w, err.Error(), true, http.StatusBadRequest)
 		return
 	}
-	events := t.Events(minLevel)
+	events := t.EventStates(minLevel)
 	res := client.TopicEvents{
 		Link:   s.topicEventsLink(t.ID(), client.Self),
 		Topic:  t.ID(),
@@ -380,7 +457,7 @@ func (s *Service) handleListTopicEvents(t *alert.Topic, w http.ResponseWriter, r
 		res.Events = append(res.Events, client.Event{
 			Link:  s.topicEventLink(t.ID(), id),
 			ID:    id,
-			State: s.convertEventState(state),
+			State: s.convertEventStateToClient(state),
 		})
 	}
 	w.WriteHeader(http.StatusOK)
@@ -397,7 +474,7 @@ func (s *Service) handleTopicEvent(t *alert.Topic, w http.ResponseWriter, r *htt
 	event := client.Event{
 		Link:  s.topicEventLink(t.ID(), id),
 		ID:    id,
-		State: s.convertEventState(state),
+		State: s.convertEventStateToClient(state),
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(httpd.MarshalJSON(event, true))
@@ -569,11 +646,27 @@ func (s *Service) EventState(topic, event string) (alert.EventState, bool) {
 }
 
 func (s *Service) Collect(event alert.Event) error {
-	return s.topics.Collect(event)
+	err := s.topics.Collect(event)
+	if err != nil {
+		return err
+	}
+	t, ok := s.topics.Topic(event.Topic)
+	if !ok {
+		// Topic was deleted, nothing to do
+		return nil
+	}
+
+	ts := TopicState{
+		Topic:       event.Topic,
+		EventStates: s.convertEventStatesFromAlert(t.EventStates(alert.OK)),
+	}
+	log.Println("D! TS", ts)
+	return s.topicsDAO.Put(ts)
 }
 
-func (s *Service) DeleteTopic(topic string) {
+func (s *Service) DeleteTopic(topic string) error {
 	s.topics.DeleteTopic(topic)
+	return s.topicsDAO.Delete(topic)
 }
 
 func (s *Service) RegisterHandler(topics []string, h alert.Handler) {
@@ -611,7 +704,7 @@ func (s *Service) RegisterHandlerSpec(spec HandlerSpec) error {
 	}
 
 	// Persist handler spec
-	if err := s.specs.Create(spec); err != nil {
+	if err := s.specsDAO.Create(spec); err != nil {
 		return err
 	}
 
@@ -630,7 +723,7 @@ func (s *Service) DeregisterHandlerSpec(id string) error {
 
 	if ok {
 		// Delete handler spec
-		if err := s.specs.Delete(id); err != nil {
+		if err := s.specsDAO.Delete(id); err != nil {
 			return err
 		}
 		s.topics.DeregisterHandler(h.Spec.Topics, h.Handler)
@@ -654,14 +747,14 @@ func (s *Service) ReplaceHandlerSpec(oldSpec, newSpec HandlerSpec) error {
 
 	// Persist new handler specs
 	if newSpec.ID == oldSpec.ID {
-		if err := s.specs.Replace(newSpec); err != nil {
+		if err := s.specsDAO.Replace(newSpec); err != nil {
 			return err
 		}
 	} else {
-		if err := s.specs.Create(newSpec); err != nil {
+		if err := s.specsDAO.Create(newSpec); err != nil {
 			return err
 		}
-		if err := s.specs.Delete(oldSpec.ID); err != nil {
+		if err := s.specsDAO.Delete(oldSpec.ID); err != nil {
 			return err
 		}
 	}

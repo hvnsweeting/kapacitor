@@ -50,6 +50,17 @@ func (s *Topics) Topic(id string) (*Topic, bool) {
 	return t, ok
 }
 
+func (s *Topics) RestoreTopic(id string, eventStates map[string]EventState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.topics[id]
+	if !ok {
+		t = newTopic(id)
+		s.topics[id] = t
+	}
+	t.restoreEventStates(eventStates)
+}
+
 func (s *Topics) EventState(topic, event string) (EventState, bool) {
 	s.mu.RLock()
 	t, ok := s.topics[topic]
@@ -168,7 +179,7 @@ func (s *Topics) TopicStatusEvents(pattern string, minLevel Level) map[string]ma
 	res := make(map[string]map[string]EventState, len(topics))
 
 	for _, topic := range topics {
-		res[topic.ID()] = topic.Events(minLevel)
+		res[topic.ID()] = topic.EventStates(minLevel)
 	}
 
 	return res
@@ -241,7 +252,21 @@ func (t *Topic) removeHandler(h Handler) {
 	}
 }
 
-func (t *Topic) Events(minLevel Level) map[string]EventState {
+func (t *Topic) restoreEventStates(eventStates map[string]EventState) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.events = make(map[string]*EventState, len(eventStates))
+	t.sorted = make([]*EventState, 0, len(eventStates))
+	for id, state := range eventStates {
+		e := new(EventState)
+		*e = state
+		t.events[id] = e
+		t.sorted = append(t.sorted, e)
+	}
+	sort.Sort(sortedStates(t.sorted))
+}
+
+func (t *Topic) EventStates(minLevel Level) map[string]EventState {
 	t.mu.RLock()
 	events := make(map[string]EventState, len(t.sorted))
 	for _, e := range t.sorted {

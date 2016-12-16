@@ -43,6 +43,8 @@ const (
 	serviceTestsPath = basePath + "/service-tests"
 	alertsPath       = basePath + "/alerts"
 	handlersPath     = alertsPath + "/handlers"
+	topicsPath       = alertsPath + "/topics"
+	topicEventsPath  = "events"
 )
 
 // HTTP configuration for connecting to Kapacitor
@@ -681,6 +683,10 @@ func (c *Client) ConfigElementLink(section, element string) Link {
 
 func (c *Client) ServiceTestLink(service string) Link {
 	return Link{Relation: Self, Href: path.Join(serviceTestsPath, service)}
+}
+
+func (c *Client) TopicEventsLink(topic string) Link {
+	return Link{Relation: Self, Href: path.Join(topicsPath, topic, topicEventsPath)}
 }
 
 type CreateTaskOptions struct {
@@ -1749,6 +1755,25 @@ type EventState struct {
 	Time     time.Time     `json:"time"`
 	Duration time.Duration `json:"duration"`
 	Level    string        `json:"level"`
+}
+
+// TopicEvents returns the current state for events within a topic.
+func (c *Client) TopicEvents(link Link) (TopicEvents, error) {
+	t := TopicEvents{}
+	if link.Href == "" {
+		return t, fmt.Errorf("invalid link %v", link)
+	}
+
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return t, err
+	}
+
+	_, err = c.Do(req, &t, http.StatusOK)
+	return t, err
 }
 
 type TopicHandlers struct {

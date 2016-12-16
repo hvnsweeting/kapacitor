@@ -3,8 +3,10 @@ package alert
 import (
 	"encoding/json"
 	"errors"
-	"path"
+	"fmt"
+	"time"
 
+	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/services/storage"
 )
 
@@ -37,14 +39,6 @@ type HandlerSpecDAO interface {
 	List(pattern string, offset, limit int) ([]HandlerSpec, error)
 }
 
-const (
-	handlerSpecDataPrefix    = "/handler-specs/data/"
-	handlerSpecIndexesPrefix = "/handler-specs/indexes/"
-
-	// Name of ID index
-	idIndex = "id/"
-)
-
 //--------------------------------------------------------------------
 // The following structures are stored in a database via gob encoding.
 // Changes to the structures could break existing data.
@@ -55,7 +49,7 @@ const (
 // the gob serialization format in incompatible ways.
 
 // version is the current version of the HandlerSpec structure.
-const version = 1
+const handlerSpecVersion = 1
 
 // HandlerSpec provides all the necessary information to create a handler.
 type HandlerSpec struct {
@@ -70,150 +64,200 @@ type HandlerActionSpec struct {
 	Options map[string]interface{} `json:"options"`
 }
 
-func encodeHandlerSpec(h HandlerSpec) ([]byte, error) {
-	return storage.VersionJSONEncode(version, h)
+func (h HandlerSpec) ObjectID() string {
+	return h.ID
 }
 
-func decodeHandlerSpec(data []byte) (h HandlerSpec, err error) {
-	err = storage.VersionJSONDecode(data, func(version int, dec *json.Decoder) error {
-		return dec.Decode(&h)
+func (h HandlerSpec) MarshalBinary() ([]byte, error) {
+	return storage.VersionJSONEncode(handlerSpecVersion, h)
+}
+
+func (h *HandlerSpec) UnmarshalBinary(data []byte) error {
+	return storage.VersionJSONDecode(data, func(version int, dec *json.Decoder) error {
+		return dec.Decode(h)
 	})
-	return h, err
 }
 
 // Key/Value store based implementation of the HandlerSpecDAO
 type handlerSpecKV struct {
-	store storage.Interface
+	store *storage.IndexedStore
 }
 
-func newHandlerSpecKV(store storage.Interface) *handlerSpecKV {
-	return &handlerSpecKV{
-		store: store,
-	}
-}
-
-// Create a key for the handler spec data
-func (d *handlerSpecKV) handlerSpecDataKey(id string) string {
-	return handlerSpecDataPrefix + id
-}
-
-// Create a key for a given index and value.
-//
-// Indexes are maintained via a 'directory' like system:
-//
-// /handler-specs/data/ID -- contains encoded handler spec data
-// /handler-specs/index/id/ID -- contains the handler spec ID
-//
-// As such to list all handlers in ID sorted order use the /handler-specs/index/id/ directory.
-func (d *handlerSpecKV) handlerSpecIndexKey(index, value string) string {
-	return handlerSpecIndexesPrefix + index + value
-}
-
-func (d *handlerSpecKV) Get(id string) (HandlerSpec, error) {
-	key := d.handlerSpecDataKey(id)
-	if exists, err := d.store.Exists(key); err != nil {
-		return HandlerSpec{}, err
-	} else if !exists {
-		return HandlerSpec{}, ErrNoHandlerSpecExists
-	}
-	kv, err := d.store.Get(key)
-	if err != nil {
-		return HandlerSpec{}, err
-	}
-	return decodeHandlerSpec(kv.Value)
-}
-
-func (d *handlerSpecKV) Create(h HandlerSpec) error {
-	key := d.handlerSpecDataKey(h.ID)
-
-	exists, err := d.store.Exists(key)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return ErrHandlerSpecExists
-	}
-
-	data, err := encodeHandlerSpec(h)
-	if err != nil {
-		return err
-	}
-	// Put data
-	err = d.store.Put(key, data)
-	if err != nil {
-		return err
-	}
-	// Put ID index
-	indexKey := d.handlerSpecIndexKey(idIndex, h.ID)
-	return d.store.Put(indexKey, []byte(h.ID))
-}
-
-func (d *handlerSpecKV) Replace(h HandlerSpec) error {
-	key := d.handlerSpecDataKey(h.ID)
-
-	exists, err := d.store.Exists(key)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNoHandlerSpecExists
-	}
-
-	data, err := encodeHandlerSpec(h)
-	if err != nil {
-		return err
-	}
-	// Put data
-	err = d.store.Put(key, data)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (d *handlerSpecKV) Delete(id string) error {
-	key := d.handlerSpecDataKey(id)
-	indexKey := d.handlerSpecIndexKey(idIndex, id)
-
-	dataErr := d.store.Delete(key)
-	indexErr := d.store.Delete(indexKey)
-	if dataErr != nil {
-		return dataErr
-	}
-	return indexErr
-}
-
-func (d *handlerSpecKV) List(pattern string, offset, limit int) ([]HandlerSpec, error) {
-	// HandlerSpecs are indexed via their ID only.
-	// While handler specs are sorted in the data section by their ID anyway
-	// this allows us to do offset/limits and filtering without having to read in all handler spec data.
-
-	// List all handler spec ids sorted by ID
-	ids, err := d.store.List(handlerSpecIndexesPrefix + idIndex)
+func newHandlerSpecKV(store storage.Interface) (*handlerSpecKV, error) {
+	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
+		return new(HandlerSpec)
+	})
+	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err
 	}
+	return &handlerSpecKV{
+		store: istore,
+	}, nil
+}
 
-	var match func([]byte) bool
-	if pattern != "" {
-		match = func(value []byte) bool {
-			id := string(value)
-			matched, _ := path.Match(pattern, id)
-			return matched
-		}
-	} else {
-		match = func([]byte) bool { return true }
+func (kv *handlerSpecKV) error(err error) error {
+	if err == storage.ErrObjectExists {
+		return ErrHandlerSpecExists
+	} else if err == storage.ErrNoObjectExists {
+		return ErrNoHandlerSpecExists
 	}
-	matches := storage.DoListFunc(ids, match, offset, limit)
+	return err
+}
 
-	specs := make([]HandlerSpec, len(matches))
-	for i, id := range matches {
-		data, err := d.store.Get(d.handlerSpecDataKey(string(id)))
-		if err != nil {
-			return nil, err
+func (kv *handlerSpecKV) Get(id string) (HandlerSpec, error) {
+	o, err := kv.store.Get(id)
+	if err != nil {
+		return HandlerSpec{}, kv.error(err)
+	}
+	h, ok := o.(*HandlerSpec)
+	if !ok {
+		return HandlerSpec{}, fmt.Errorf("impossible error, object not a HandlerSpec, got %T", o)
+	}
+	return *h, nil
+}
+
+func (kv *handlerSpecKV) Create(h HandlerSpec) error {
+	return kv.store.Create(&h)
+}
+
+func (kv *handlerSpecKV) Replace(h HandlerSpec) error {
+	return kv.store.Replace(&h)
+}
+
+func (kv *handlerSpecKV) Delete(id string) error {
+	return kv.store.Delete(id)
+}
+
+func (kv *handlerSpecKV) List(pattern string, offset, limit int) ([]HandlerSpec, error) {
+	objects, err := kv.store.List(storage.DefaultIDIndex, pattern, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	specs := make([]HandlerSpec, len(objects))
+	for i, o := range objects {
+		h, ok := o.(*HandlerSpec)
+		if !ok {
+			return nil, fmt.Errorf("impossible error, object not a HandlerSpec, got %T", o)
 		}
-		t, err := decodeHandlerSpec(data.Value)
-		specs[i] = t
+		specs[i] = *h
+	}
+	return specs, nil
+}
+
+var (
+	ErrNoTopicStateExists = errors.New("no topic state exists")
+)
+
+// Data access object for TopicState data.
+type TopicStateDAO interface {
+	// Retrieve a handler
+	Get(id string) (TopicState, error)
+
+	// Put a topic state, replaces any existing state.
+	Put(h TopicState) error
+
+	// Delete a handler.
+	// It is not an error to delete an non-existent handler.
+	Delete(id string) error
+
+	// List handlers matching a pattern.
+	// The pattern is shell/glob matching see https://golang.org/pkg/path/#Match
+	// Offset and limit are pagination bounds. Offset is inclusive starting at index 0.
+	// More results may exist while the number of returned items is equal to limit.
+	List(pattern string, offset, limit int) ([]TopicState, error)
+}
+
+const topicStateVersion = 1
+
+type TopicState struct {
+	Topic       string                `json:"topic"`
+	EventStates map[string]EventState `json:"event-states"`
+}
+
+type EventState struct {
+	Message  string        `json:"message"`
+	Details  string        `json:"details"`
+	Time     time.Time     `json:"time"`
+	Duration time.Duration `json:"duration"`
+	Level    alert.Level   `json:"level"`
+}
+
+func (t TopicState) ObjectID() string {
+	return t.Topic
+}
+
+func (t TopicState) MarshalBinary() ([]byte, error) {
+	return storage.VersionJSONEncode(topicStateVersion, t)
+}
+
+func (t *TopicState) UnmarshalBinary(data []byte) error {
+	return storage.VersionJSONDecode(data, func(version int, dec *json.Decoder) error {
+		return dec.Decode(&t)
+	})
+}
+
+// Key/Value store based implementation of the TopicStateDAO
+type topicStateKV struct {
+	store *storage.IndexedStore
+}
+
+func newTopicStateKV(store storage.Interface) (*topicStateKV, error) {
+	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
+		return new(TopicState)
+	})
+	istore, err := storage.NewIndexedStore(store, c)
+	if err != nil {
+		return nil, err
+	}
+	return &topicStateKV{
+		store: istore,
+	}, nil
+}
+
+func (kv *topicStateKV) error(err error) error {
+	if err == storage.ErrNoObjectExists {
+		return ErrNoTopicStateExists
+	}
+	return err
+}
+
+func (kv *topicStateKV) Get(id string) (TopicState, error) {
+	o, err := kv.store.Get(id)
+	if err != nil {
+		return TopicState{}, kv.error(err)
+	}
+	t, ok := o.(*TopicState)
+	if !ok {
+		return TopicState{}, fmt.Errorf("impossible error, object not a TopicState, got %T", o)
+	}
+	return *t, nil
+}
+
+func (kv *topicStateKV) Put(t TopicState) error {
+	return kv.store.Put(&t)
+}
+
+func (kv *topicStateKV) Replace(t TopicState) error {
+	return kv.store.Replace(&t)
+}
+
+func (kv *topicStateKV) Delete(id string) error {
+	return kv.store.Delete(id)
+}
+
+func (kv *topicStateKV) List(pattern string, offset, limit int) ([]TopicState, error) {
+	objects, err := kv.store.List(storage.DefaultIDIndex, pattern, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	specs := make([]TopicState, len(objects))
+	for i, o := range objects {
+		t, ok := o.(*TopicState)
+		if !ok {
+			return nil, fmt.Errorf("impossible error, object not a TopicState, got %T", o)
+		}
+		specs[i] = *t
 	}
 	return specs, nil
 }

@@ -7477,3 +7477,87 @@ stream
 		}
 	}
 }
+
+func TestServer_AlertTopic_PersistedState(t *testing.T) {
+	// Setup test TCP server
+	ts, err := alerttest.NewTCPServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Close()
+
+	// Create default config
+	c := NewConfig()
+	s := OpenServer(c)
+	cli := Client(s)
+	defer s.Close()
+
+	if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+		ID:     "testAlertHandler",
+		Topics: []string{"test"},
+		Actions: []client.HandlerAction{{
+			Kind:    "tcp",
+			Options: map[string]interface{}{"address": ts.Addr},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tick := `
+stream
+	|from()
+		.measurement('alert')
+	|alert()
+		.topic('test')
+		.id('id')
+		.message('message')
+		.details('details')
+		.crit(lambda: TRUE)
+`
+
+	if _, err := cli.CreateTask(client.CreateTaskOptions{
+		ID:   "testAlertHandlers",
+		Type: client.StreamTask,
+		DBRPs: []client.DBRP{{
+			Database:        "mydb",
+			RetentionPolicy: "myrp",
+		}},
+		TICKscript: tick,
+		Status:     client.Enabled,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	point := "alert value=1 0000000000"
+	v := url.Values{}
+	v.Add("precision", "s")
+	s.MustWrite("mydb", "myrp", point, v)
+
+	// Restart the server
+	s.Restart()
+
+	l := cli.TopicEventsLink("test")
+	if te, err := cli.TopicEvents(l); err != nil {
+		t.Fatal(err)
+	} else {
+		expTE := client.TopicEvents{
+			Link:  l,
+			Topic: "test",
+			Events: []client.Event{{
+				Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test/events/id"},
+				ID:   "id",
+				State: client.EventState{
+					Message:  "message",
+					Details:  "details",
+					Time:     time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+					Duration: 0,
+					Level:    "CRITICAL",
+				},
+			}},
+		}
+
+		if !reflect.DeepEqual(te, expTE) {
+			t.Errorf("unexpected topic events:\ngot\n%+v\nexp\n%+v\n", te, expTE)
+		}
+	}
+}
