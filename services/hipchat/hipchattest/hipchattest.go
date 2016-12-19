@@ -27,6 +27,7 @@ func NewServer() *Server {
 	s.URL = ts.URL
 	return s
 }
+
 func (s *Server) Requests() []Request {
 	return s.requests
 }

@@ -258,7 +258,6 @@ func (tm *TaskMaster) Drain() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// TODO(yosia): handle this thing ;)
 	for id, _ := range tm.taskToForkKeys {
 		tm.delFork(id)
 	}
@@ -330,11 +329,22 @@ func (tm *TaskMaster) NewTask(
 }
 
 func (tm *TaskMaster) waitForForks() {
-	if tm.drained {
+	tm.mu.Lock()
+	drained := tm.drained
+	tm.mu.Unlock()
+
+	if drained {
 		return
 	}
+
+	tm.mu.Lock()
 	tm.drained = true
+	tm.mu.Unlock()
+
+	// Close the write points in stream
 	tm.writePointsIn.Close()
+
+	// Don't hold the lock while we wait
 	tm.wg.Wait()
 }
 
@@ -491,14 +501,15 @@ func (tm *TaskMaster) stream(name string) (StreamCollector, error) {
 		return nil, ErrTaskMasterClosed
 	}
 	in := newEdge(fmt.Sprintf("task_master:%s", tm.id), name, "stream", pipeline.StreamEdge, defaultEdgeBufferSize, tm.LogService)
-	tm.drained = false
 	tm.wg.Add(1)
-	go tm.runForking(in)
+	go func() {
+		defer tm.wg.Done()
+		tm.runForking(in)
+	}()
 	return in, nil
 }
 
 func (tm *TaskMaster) runForking(in *Edge) {
-	defer tm.wg.Done()
 	for p, ok := in.NextPoint(); ok; p, ok = in.NextPoint() {
 		tm.forkPoint(p)
 	}

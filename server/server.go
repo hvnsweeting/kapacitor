@@ -85,6 +85,7 @@ type Server struct {
 	InfluxDBService       *influxdb.Service
 	ConfigOverrideService *config.Service
 	TesterService         *servicetest.Service
+	StatsService          *stats.Service
 
 	MetaClient    *kapacitor.NoopMetaClient
 	QueryExecutor *Queryexecutor
@@ -210,9 +211,6 @@ func New(c *Config, buildInfo BuildInfo, logService logging.Interface) (*Server,
 	s.appendStatsService()
 	s.appendReportingService()
 
-	// Append HTTPD Service last so that the API is not listening till everything else succeeded.
-	s.appendHTTPDService()
-
 	return s, nil
 }
 
@@ -318,10 +316,6 @@ func (s *Server) initHTTPDService() {
 
 	s.HTTPDService = srv
 	s.TaskMaster.HTTPDService = srv
-}
-
-func (s *Server) appendHTTPDService() {
-	s.AppendService("httpd", s.HTTPDService)
 }
 
 func (s *Server) appendTaskStoreService() {
@@ -568,6 +562,7 @@ func (s *Server) appendStatsService() {
 		srv := stats.NewService(c, l)
 		srv.TaskMaster = s.TaskMaster
 
+		s.StatsService = srv
 		s.TaskMaster.TimingService = srv
 		s.AppendService("stats", srv)
 	}
@@ -594,6 +589,10 @@ func (s *Server) Open() error {
 
 	if err := s.startServices(); err != nil {
 		s.Close()
+		return err
+	}
+	// Open HTTPD Service last so that the API is not listening till everything else succeeded.
+	if err := s.HTTPDService.Open(); err != nil {
 		return err
 	}
 
@@ -658,7 +657,18 @@ func (s *Server) watchConfigUpdates() {
 func (s *Server) Close() error {
 	s.stopProfile()
 
-	// First stop all tasks.
+	// Close all services that write points first.
+	if err := s.HTTPDService.Close(); err != nil {
+		s.Logger.Printf("E! error closing httpd service: %v", err)
+	}
+	if s.StatsService != nil {
+		if err := s.StatsService.Close(); err != nil {
+			s.Logger.Printf("E! error closing stats service: %v", err)
+		}
+	}
+
+	// Drain the in-flight writes and stop all tasks.
+	s.TaskMaster.Drain()
 	s.TaskMaster.StopTasks()
 
 	// Close services now that all tasks are stopped.

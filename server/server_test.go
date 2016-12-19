@@ -7407,38 +7407,39 @@ func TestServer_AlertHandlers(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		kind := tc.handlerAction.Kind
-		// Create default config
-		c := NewConfig()
-		var ctxt context.Context
-		if tc.setup != nil {
-			var err error
-			ctxt, err = tc.setup(c, &tc.handlerAction)
-			if err != nil {
-				t.Fatal(err)
+		t.Run(tc.handlerAction.Kind, func(t *testing.T) {
+			kind := tc.handlerAction.Kind
+			// Create default config
+			c := NewConfig()
+			var ctxt context.Context
+			if tc.setup != nil {
+				var err error
+				ctxt, err = tc.setup(c, &tc.handlerAction)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
-		}
-		s := OpenServer(c)
-		cli := Client(s)
-		closed := false
-		defer func() {
-			if !closed {
-				s.Close()
+			s := OpenServer(c)
+			cli := Client(s)
+			closed := false
+			defer func() {
+				if !closed {
+					s.Close()
+				}
+			}()
+			ctxt = context.WithValue(ctxt, "kapacitorURL", s.URL())
+
+			if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+				ID:     "testAlertHandlers",
+				Topics: []string{"test"},
+				Actions: []client.HandlerAction{
+					tc.handlerAction,
+				},
+			}); err != nil {
+				t.Fatalf("%s: %v", kind, err)
 			}
-		}()
-		ctxt = context.WithValue(ctxt, "kapacitorURL", s.URL())
 
-		if _, err := cli.CreateHandler(client.CreateHandlerOptions{
-			ID:     "testAlertHandlers",
-			Topics: []string{"test"},
-			Actions: []client.HandlerAction{
-				tc.handlerAction,
-			},
-		}); err != nil {
-			t.Fatalf("%s: %v", kind, err)
-		}
-
-		tick := `
+			tick := `
 stream
 	|from()
 		.measurement('alert')
@@ -7450,31 +7451,32 @@ stream
 		.crit(lambda: TRUE)
 `
 
-		if _, err := cli.CreateTask(client.CreateTaskOptions{
-			ID:   "testAlertHandlers",
-			Type: client.StreamTask,
-			DBRPs: []client.DBRP{{
-				Database:        "mydb",
-				RetentionPolicy: "myrp",
-			}},
-			TICKscript: tick,
-			Status:     client.Enabled,
-		}); err != nil {
-			t.Fatalf("%s: %v", kind, err)
-		}
+			if _, err := cli.CreateTask(client.CreateTaskOptions{
+				ID:   "testAlertHandlers",
+				Type: client.StreamTask,
+				DBRPs: []client.DBRP{{
+					Database:        "mydb",
+					RetentionPolicy: "myrp",
+				}},
+				TICKscript: tick,
+				Status:     client.Enabled,
+			}); err != nil {
+				t.Fatalf("%s: %v", kind, err)
+			}
 
-		point := "alert value=1 0000000000"
-		v := url.Values{}
-		v.Add("precision", "s")
-		s.MustWrite("mydb", "myrp", point, v)
+			point := "alert value=1 0000000000"
+			v := url.Values{}
+			v.Add("precision", "s")
+			s.MustWrite("mydb", "myrp", point, v)
 
-		// Close the entire server to ensure all data is processed
-		s.Close()
-		closed = true
+			// Close the entire server to ensure all data is processed
+			s.Close()
+			closed = true
 
-		if err := tc.result(ctxt); err != nil {
-			t.Errorf("%s: %v", kind, err)
-		}
+			if err := tc.result(ctxt); err != nil {
+				t.Errorf("%s: %v", kind, err)
+			}
+		})
 	}
 }
 
