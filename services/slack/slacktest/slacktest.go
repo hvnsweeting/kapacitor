@@ -57,7 +57,8 @@ type PostData struct {
 }
 
 type Attachment struct {
-	Fallback string `json:"fallback"`
-	Color    string `json:"color"`
-	Text     string `json:"text"`
+	Fallback  string   `json:"fallback"`
+	Color     string   `json:"color"`
+	Text      string   `json:"text"`
+	Mrkdwn_in []string `json:"mrkdwn_in"`
 }
