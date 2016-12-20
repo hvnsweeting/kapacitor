@@ -218,7 +218,7 @@ func (tm *TaskMaster) StopTasks() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	for _, et := range tm.tasks {
-		tm.stopTask(et.Task.ID)
+		_ = tm.stopTask(et.Task.ID)
 	}
 }
 
@@ -231,7 +231,7 @@ func (tm *TaskMaster) Close() error {
 	}
 	tm.closed = true
 	for _, et := range tm.tasks {
-		tm.stopTask(et.Task.ID)
+		_ = tm.stopTask(et.Task.ID)
 	}
 	tm.logger.Println("I! closed")
 	return nil
@@ -514,11 +514,11 @@ func (tm *TaskMaster) forkPoint(p models.Point) {
 
 	// Merge the results to the forks map
 	for _, edge := range tm.forks[key] {
-		edge.CollectPoint(p)
+		_ = edge.CollectPoint(p)
 	}
 
 	for _, edge := range tm.forks[emptyMeasurementKey] {
-		edge.CollectPoint(p)
+		_ = edge.CollectPoint(p)
 	}
 
 	c, ok := tm.forkStats[key]

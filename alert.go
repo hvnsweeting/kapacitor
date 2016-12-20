@@ -157,7 +157,7 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 				an.bufPool.Put(tmpBuffer)
 			}()
 
-			json.NewEncoder(tmpBuffer).Encode(v)
+			_ = json.NewEncoder(tmpBuffer).Encode(v)
 
 			return html.JS(tmpBuffer.String())
 		},
@@ -944,7 +944,7 @@ func (a *AlertNode) handleTcp(tcp *pipeline.TcpHandler, ad *AlertData) {
 	defer conn.Close()
 
 	buf.WriteByte('\n')
-	conn.Write(buf.Bytes())
+	_, _ = conn.Write(buf.Bytes())
 
 	return
 }

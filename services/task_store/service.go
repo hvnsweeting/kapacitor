@@ -540,6 +540,7 @@ func (ts *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		offset, err = strconv.ParseInt(offsetStr, 10, 64)
 		if err != nil {
 			httpd.HttpError(w, fmt.Sprintf("invalid offset parameter %q must be an integer: %s", offsetStr, err), true, http.StatusBadRequest)
+			return
 		}
 	}
 
@@ -549,10 +550,15 @@ func (ts *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		limit, err = strconv.ParseInt(limitStr, 10, 64)
 		if err != nil {
 			httpd.HttpError(w, fmt.Sprintf("invalid limit parameter %q must be an integer: %s", limitStr, err), true, http.StatusBadRequest)
+			return
 		}
 	}
 
 	rawTasks, err := ts.tasks.List(pattern, int(offset), int(limit))
+	if err != nil {
+		httpd.HttpError(w, fmt.Sprintf("failed to list tasks with pattern %q: %s", pattern, err), true, http.StatusBadRequest)
+		return
+	}
 	tasks := make([]map[string]interface{}, len(rawTasks))
 
 	tm := ts.TaskMasterLookup.Main()
@@ -1457,6 +1463,7 @@ func (ts *Service) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		offset, err = strconv.ParseInt(offsetStr, 10, 64)
 		if err != nil {
 			httpd.HttpError(w, fmt.Sprintf("invalid offset parameter %q must be an integer: %s", offsetStr, err), true, http.StatusBadRequest)
+			return
 		}
 	}
 
@@ -1466,10 +1473,15 @@ func (ts *Service) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		limit, err = strconv.ParseInt(limitStr, 10, 64)
 		if err != nil {
 			httpd.HttpError(w, fmt.Sprintf("invalid limit parameter %q must be an integer: %s", limitStr, err), true, http.StatusBadRequest)
+			return
 		}
 	}
 
 	rawTemplates, err := ts.templates.List(pattern, int(offset), int(limit))
+	if err != nil {
+		httpd.HttpError(w, fmt.Sprintf("failed to list templates with pattern %q: %s", pattern, err), true, http.StatusBadRequest)
+		return
+	}
 	templates := make([]map[string]interface{}, len(rawTemplates))
 
 	for i, template := range rawTemplates {

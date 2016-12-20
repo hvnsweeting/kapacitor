@@ -280,6 +280,9 @@ func (d *recordingKV) List(pattern string, offset, limit int) ([]Recording, erro
 			return nil, err
 		}
 		t, err := d.decodeRecording(data.Value)
+		if err != nil {
+			return nil, err
+		}
 		recordings[i] = t
 	}
 	return recordings, nil
@@ -528,6 +531,9 @@ func (d *replayKV) List(pattern string, offset, limit int) ([]Replay, error) {
 			return nil, err
 		}
 		t, err := d.decodeReplay(data.Value)
+		if err != nil {
+			return nil, err
+		}
 		replays[i] = t
 	}
 	return replays, nil

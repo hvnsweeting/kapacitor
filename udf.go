@@ -243,7 +243,9 @@ func (p *UDFProcess) Open() error {
 		p.abortCallback,
 		cmd.Kill,
 	)
-	p.server.Start()
+	if err := p.server.Start(); err != nil {
+		return err
+	}
 
 	p.logStdErrGroup.Add(1)
 	go p.logStdErr()
@@ -334,7 +336,7 @@ func (c cmd) StderrPipe() (io.Reader, error) { return c.Cmd.StderrPipe() }
 
 func (c cmd) Kill() {
 	if c.Cmd.Process != nil {
-		c.Cmd.Process.Kill()
+		_ = c.Cmd.Process.Kill()
 	}
 }
 

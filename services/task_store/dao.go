@@ -315,6 +315,9 @@ func (d *taskKV) List(pattern string, offset, limit int) ([]Task, error) {
 			return nil, err
 		}
 		t, err := d.decodeTask(data.Value)
+		if err != nil {
+			return nil, err
+		}
 		tasks[i] = t
 	}
 	return tasks, nil
@@ -519,6 +522,9 @@ func (d *templateKV) List(pattern string, offset, limit int) ([]Template, error)
 			return nil, err
 		}
 		t, err := d.decodeTemplate(data.Value)
+		if err != nil {
+			return nil, err
+		}
 		templates[i] = t
 	}
 	return templates, nil
