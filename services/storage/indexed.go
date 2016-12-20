@@ -106,8 +106,8 @@ func NewIndexedStore(store Interface, c IndexedStoreConfig) (*IndexedStore, erro
 }
 
 // Create a key for the object data
-func (c *IndexedStore) dataKey(id string) string {
-	return path.Join(c.dataPrefix, id)
+func (s *IndexedStore) dataKey(id string) string {
+	return path.Join(s.dataPrefix, id)
 }
 
 // Create a key for a given index and value.
@@ -118,43 +118,59 @@ func (c *IndexedStore) dataKey(id string) string {
 // /<indexesPrefix>/id/<value> -- contains the object ID
 //
 // As such to list all handlers in ID sorted order use the /<indexesPrefix>/id/ directory.
-func (c *IndexedStore) indexKey(index, value string) string {
-	return path.Join(c.indexesPrefix, index, value) + "/"
+func (s *IndexedStore) indexKey(index, value string) string {
+	return path.Join(s.indexesPrefix, index, value) + "/"
 }
 
-func (c *IndexedStore) Get(id string) (BinaryObject, error) {
-	key := c.dataKey(id)
-	if exists, err := c.store.Exists(key); err != nil {
+func (s *IndexedStore) get(tx ReadOnlyTx, id string) (BinaryObject, error) {
+	key := s.dataKey(id)
+	if exists, err := tx.Exists(key); err != nil {
 		return nil, err
 	} else if !exists {
 		return nil, ErrNoObjectExists
 	}
-	kv, err := c.store.Get(key)
+	kv, err := tx.Get(key)
 	if err != nil {
 		return nil, err
 	}
-	o := c.newObject()
+	o := s.newObject()
 	err = o.UnmarshalBinary(kv.Value)
 	return o, err
+
 }
 
-func (c *IndexedStore) Create(o BinaryObject) error {
-	return c.put(o, false, false)
+func (s *IndexedStore) Get(id string) (BinaryObject, error) {
+	tx, err := s.store.BeginReadOnlyTx()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	return s.get(tx, id)
 }
 
-func (c *IndexedStore) Put(o BinaryObject) error {
-	return c.put(o, true, false)
+func (s *IndexedStore) Create(o BinaryObject) error {
+	return s.put(o, false, false)
 }
 
-func (c *IndexedStore) Replace(o BinaryObject) error {
-	return c.put(o, true, true)
+func (s *IndexedStore) Put(o BinaryObject) error {
+	return s.put(o, true, false)
 }
 
-func (c *IndexedStore) put(o BinaryObject, allowReplace, requireReplace bool) error {
-	key := c.dataKey(o.ObjectID())
+func (s *IndexedStore) Replace(o BinaryObject) error {
+	return s.put(o, true, true)
+}
+
+func (s *IndexedStore) put(o BinaryObject, allowReplace, requireReplace bool) error {
+	tx, err := s.store.BeginTx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	key := s.dataKey(o.ObjectID())
 
 	replacing := false
-	old, err := c.Get(o.ObjectID())
+	old, err := s.get(tx, o.ObjectID())
 	if err != nil {
 		if err != ErrNoObjectExists || (requireReplace && err == ErrNoObjectExists) {
 			return err
@@ -171,20 +187,18 @@ func (c *IndexedStore) put(o BinaryObject, allowReplace, requireReplace bool) er
 	}
 
 	// Put data
-	err = c.store.Put(key, data)
+	err = tx.Put(key, data)
 	if err != nil {
 		return err
 	}
 	// Put all indexes
-	for _, idx := range c.indexes {
-		// TODO implement rollback
-
+	for _, idx := range s.indexes {
 		// Get new index key
 		newValue, err := idx.ValueF(o)
 		if err != nil {
 			return err
 		}
-		newIndexKey := c.indexKey(idx.Name, newValue)
+		newIndexKey := s.indexKey(idx.Name, newValue)
 
 		// Get old index key, if we are replacing
 		var oldValue string
@@ -195,29 +209,34 @@ func (c *IndexedStore) put(o BinaryObject, allowReplace, requireReplace bool) er
 				return err
 			}
 		}
-		oldIndexKey := c.indexKey(idx.Name, oldValue)
+		oldIndexKey := s.indexKey(idx.Name, oldValue)
 
 		if !replacing || (replacing && oldIndexKey != newIndexKey) {
 			// Update new key
-			err := c.store.Put(newIndexKey, []byte(o.ObjectID()))
+			err := tx.Put(newIndexKey, []byte(o.ObjectID()))
 			if err != nil {
 				return err
 			}
 			if replacing {
 				// Remove old key
-				err = c.store.Delete(oldIndexKey)
+				err = tx.Delete(oldIndexKey)
 				if err != nil {
 					return err
 				}
 			}
 		}
 	}
-	return nil
-
+	return tx.Commit()
 }
 
-func (c *IndexedStore) Delete(id string) error {
-	o, err := c.Get(id)
+func (s *IndexedStore) Delete(id string) error {
+	tx, err := s.store.BeginTx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	o, err := s.get(tx, id)
 	if err == ErrNoObjectExists {
 		// Nothing to do
 		return nil
@@ -225,34 +244,37 @@ func (c *IndexedStore) Delete(id string) error {
 		return err
 	}
 
-	// Keep track of first error
-	var firstError error
-
 	// Delete object
-	key := c.dataKey(id)
-	err = c.store.Delete(key)
+	key := s.dataKey(id)
+	err = tx.Delete(key)
 	if err != nil {
-		firstError = err
+		return err
 	}
 
 	// Delete all indexes
-	for _, idx := range c.indexes {
+	for _, idx := range s.indexes {
 		value, err := idx.ValueF(o)
-		if err != nil && firstError == nil {
-			firstError = err
+		if err != nil {
+			return err
 		}
-		indexKey := c.indexKey(idx.Name, value)
-		err = c.store.Delete(indexKey)
-		if err != nil && firstError == nil {
-			firstError = err
+		indexKey := s.indexKey(idx.Name, value)
+		err = tx.Delete(indexKey)
+		if err != nil {
+			return err
 		}
 	}
-	return firstError
+	return tx.Commit()
 }
 
-func (c *IndexedStore) List(index, pattern string, offset, limit int) ([]BinaryObject, error) {
+func (s *IndexedStore) List(index, pattern string, offset, limit int) ([]BinaryObject, error) {
+	tx, err := s.store.BeginReadOnlyTx()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// List all object ids sorted by index
-	ids, err := c.store.List(c.indexKey(index, ""))
+	ids, err := tx.List(s.indexKey(index, ""))
 	if err != nil {
 		return nil, err
 	}
@@ -271,11 +293,11 @@ func (c *IndexedStore) List(index, pattern string, offset, limit int) ([]BinaryO
 
 	objects := make([]BinaryObject, len(matches))
 	for i, id := range matches {
-		data, err := c.store.Get(c.dataKey(string(id)))
+		data, err := tx.Get(s.dataKey(string(id)))
 		if err != nil {
 			return nil, err
 		}
-		o := c.newObject()
+		o := s.newObject()
 		err = o.UnmarshalBinary(data.Value)
 		if err != nil {
 			return nil, err
