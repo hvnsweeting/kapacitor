@@ -39,6 +39,8 @@ const (
 const (
 	// Root path for the API
 	BasePath = "/kapacitor/v1"
+	// Root path for the preview API
+	BasePreviewPath = "/kapacitor/v1preview"
 	// Name of the special user for subscriptions
 	SubscriptionUser = "~subscriber"
 )
@@ -137,6 +139,13 @@ func NewHandler(
 			HandlerFunc: h.serve404,
 		}
 		h.addRawRoute(route)
+		previewRoute := Route{
+			// Catch all Rewrite+404
+			Method:      method,
+			Pattern:     BasePreviewPath + "/",
+			HandlerFunc: h.rewritePreview,
+		}
+		h.addRawRoute(previewRoute)
 	}
 
 	h.addRawRoutes([]Route{
@@ -246,6 +255,24 @@ func (h *Handler) AddRoute(r Route) error {
 	return h.addRawRoute(r)
 }
 
+func (h *Handler) AddPreviewRoutes(routes []Route) error {
+	for _, r := range routes {
+		err := h.AddPreviewRoute(r)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *Handler) AddPreviewRoute(r Route) error {
+	if len(r.Pattern) > 0 && r.Pattern[0] != '/' {
+		return fmt.Errorf("route patterns must begin with a '/' %s", r.Pattern)
+	}
+	r.Pattern = BasePreviewPath + r.Pattern
+	return h.addRawRoute(r)
+}
+
 func (h *Handler) addRawRoutes(routes []Route) error {
 	for _, r := range routes {
 		err := h.addRawRoute(r)
@@ -312,6 +339,17 @@ func (h *Handler) delRawRoute(r Route) {
 	mux, ok := h.methodMux[r.Method]
 	if ok {
 		mux.Deregister(r.Pattern)
+	}
+}
+
+// RewritePreview rewrites the URL path from BasePreviewPath to BasePath,
+// thus allowing any URI that exist on BasePath to be auto promotted to the BasePreviewPath.
+func (h *Handler) rewritePreview(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, BasePreviewPath) {
+		r.URL.Path = strings.Replace(r.URL.Path, BasePreviewPath, BasePath, 1)
+		h.ServeHTTP(w, r)
+	} else {
+		h.serve404(w, r)
 	}
 }
 

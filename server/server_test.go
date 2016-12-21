@@ -6637,7 +6637,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 				}},
 			},
 			expCreate: client.Handler{
-				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/myhandler"},
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/myhandler"},
 				ID:     "myhandler",
 				Topics: []string{"system", "test"},
 				Actions: []client.HandlerAction{{
@@ -6659,7 +6659,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 				},
 			},
 			expPatch: client.Handler{
-				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/myhandler"},
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/myhandler"},
 				ID:     "myhandler",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{{
@@ -6680,7 +6680,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 				}},
 			},
 			expPut: client.Handler{
-				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/newid"},
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/newid"},
 				ID:     "newid",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{{
@@ -6711,7 +6711,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 				},
 			},
 			expCreate: client.Handler{
-				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/anotherhandler"},
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/anotherhandler"},
 				ID:     "anotherhandler",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{
@@ -6752,7 +6752,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 				},
 			},
 			expPatch: client.Handler{
-				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/anotherhandler"},
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/anotherhandler"},
 				ID:     "anotherhandler",
 				Topics: []string{"test", "system"},
 				Actions: []client.HandlerAction{
@@ -6787,7 +6787,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 				}},
 			},
 			expPut: client.Handler{
-				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/anotherhandler"},
+				Link:   client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/anotherhandler"},
 				ID:     "anotherhandler",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{{
@@ -7544,7 +7544,7 @@ stream
 		Link:  l,
 		Topic: "test",
 		Events: []client.Event{{
-			Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test/events/id"},
+			Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/topics/test/events/id"},
 			ID:   "id",
 			State: client.EventState{
 				Message:  "message",
@@ -7607,22 +7607,22 @@ func TestServer_AlertListHandlers(t *testing.T) {
 	}
 
 	expHandlers := client.Handlers{
-		Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers?pattern="},
+		Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers?pattern="},
 		Handlers: []client.Handler{
 			{
-				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/handler0"},
+				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/handler0"},
 				ID:      "handler0",
 				Topics:  topics,
 				Actions: actions,
 			},
 			{
-				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/handler1"},
+				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/handler1"},
 				ID:      "handler1",
 				Topics:  topics,
 				Actions: actions,
 			},
 			{
-				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/handler2"},
+				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/handlers/handler2"},
 				ID:      "handler2",
 				Topics:  topics,
 				Actions: actions,
@@ -7660,7 +7660,7 @@ func TestServer_AlertListHandlers(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp = expHandlers
-	exp.Link.Href = "/kapacitor/v1/alerts/handlers?pattern=%2A"
+	exp.Link.Href = "/kapacitor/v1preview/alerts/handlers?pattern=%2A"
 	if !reflect.DeepEqual(handlers, exp) {
 		t.Errorf("unexpected handlers with pattern \"*\":\ngot\n%+v\nexp\n%+v\n", handlers, exp)
 	}
@@ -7673,7 +7673,7 @@ func TestServer_AlertListHandlers(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp = expHandlers
-	exp.Link.Href = "/kapacitor/v1/alerts/handlers?pattern=handler%2A"
+	exp.Link.Href = "/kapacitor/v1preview/alerts/handlers?pattern=handler%2A"
 	if !reflect.DeepEqual(handlers, exp) {
 		t.Errorf("unexpected handlers with pattern \"test\":\ngot\n%+v\nexp\n%+v\n", handlers, exp)
 	}
@@ -7686,7 +7686,7 @@ func TestServer_AlertListHandlers(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp = expHandlers
-	exp.Link.Href = "/kapacitor/v1/alerts/handlers?pattern=handler0"
+	exp.Link.Href = "/kapacitor/v1preview/alerts/handlers?pattern=handler0"
 	exp.Handlers = expHandlers.Handlers[0:1]
 	if !reflect.DeepEqual(handlers, exp) {
 		t.Errorf("unexpected handlers with pattern \"test\":\ngot\n%+v\nexp\n%+v\n", handlers, exp)
@@ -7696,7 +7696,7 @@ func TestServer_AlertListHandlers(t *testing.T) {
 	l := cli.TopicHandlersLink("test")
 	topicHandlers, err := cli.ListTopicHandlers(l)
 	expTopicHandlers := client.TopicHandlers{
-		Link:     client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test/handlers"},
+		Link:     client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/topics/test/handlers"},
 		Topic:    "test",
 		Handlers: expHandlers.Handlers,
 	}
@@ -7731,28 +7731,28 @@ func TestServer_AlertListTopics(t *testing.T) {
 	}
 
 	expTopics := client.Topics{
-		Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics?min-level=OK&pattern="},
+		Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/topics?min-level=OK&pattern="},
 		Topics: []client.Topic{
 			{
-				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/misc"},
+				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/topics/misc"},
 				ID:           "misc",
 				Level:        "OK",
-				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1/alerts/topics/misc/events"},
-				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1/alerts/topics/misc/handlers"},
+				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1preview/alerts/topics/misc/events"},
+				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1preview/alerts/topics/misc/handlers"},
 			},
 			{
-				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/system"},
+				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/topics/system"},
 				ID:           "system",
 				Level:        "OK",
-				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1/alerts/topics/system/events"},
-				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1/alerts/topics/system/handlers"},
+				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1preview/alerts/topics/system/events"},
+				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1preview/alerts/topics/system/handlers"},
 			},
 			{
-				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test"},
+				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1preview/alerts/topics/test"},
 				ID:           "test",
 				Level:        "OK",
-				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1/alerts/topics/test/events"},
-				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1/alerts/topics/test/handlers"},
+				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1preview/alerts/topics/test/events"},
+				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1preview/alerts/topics/test/handlers"},
 			},
 		},
 	}
@@ -7819,7 +7819,7 @@ stream
 		t.Fatal(err)
 	}
 	exp = expTopics
-	exp.Link.Href = "/kapacitor/v1/alerts/topics?min-level=OK&pattern=%2A"
+	exp.Link.Href = "/kapacitor/v1preview/alerts/topics?min-level=OK&pattern=%2A"
 	if !reflect.DeepEqual(topics, exp) {
 		t.Errorf("unexpected topics with pattern \"*\":\ngot\n%+v\nexp\n%+v\n", topics, exp)
 	}
@@ -7832,7 +7832,7 @@ stream
 		t.Fatal(err)
 	}
 	exp = expTopics
-	exp.Link.Href = "/kapacitor/v1/alerts/topics?min-level=OK&pattern=test"
+	exp.Link.Href = "/kapacitor/v1preview/alerts/topics?min-level=OK&pattern=test"
 	exp.Topics = expTopics.Topics[2:]
 	if !reflect.DeepEqual(topics, exp) {
 		t.Errorf("unexpected topics with pattern \"test\":\ngot\n%+v\nexp\n%+v\n", topics, exp)
@@ -7846,7 +7846,7 @@ stream
 		t.Fatal(err)
 	}
 	exp = expTopics
-	exp.Link.Href = "/kapacitor/v1/alerts/topics?min-level=INFO&pattern="
+	exp.Link.Href = "/kapacitor/v1preview/alerts/topics?min-level=INFO&pattern="
 	exp.Topics = expTopics.Topics[2:]
 	if !reflect.DeepEqual(topics, exp) {
 		t.Errorf("unexpected topics min level \"info\":\ngot\n%+v\nexp\n%+v\n", topics, exp)

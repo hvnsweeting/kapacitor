@@ -27,6 +27,7 @@ const DefaultUserAgent = "KapacitorClient"
 
 const (
 	basePath          = "/kapacitor/v1"
+	basePreviewPath   = "/kapacitor/v1preview"
 	pingPath          = basePath + "/ping"
 	logLevelPath      = basePath + "/loglevel"
 	debugVarsPath     = basePath + "/debug/vars"
@@ -41,7 +42,7 @@ const (
 	replayQueryPath   = basePath + "/replays/query"
 	configPath        = basePath + "/config"
 	serviceTestsPath  = basePath + "/service-tests"
-	alertsPath        = basePath + "/alerts"
+	alertsPath        = basePreviewPath + "/alerts"
 	handlersPath      = alertsPath + "/handlers"
 	topicsPath        = alertsPath + "/topics"
 	topicEventsPath   = "events"

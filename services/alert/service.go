@@ -35,13 +35,13 @@ const (
 
 	topicsPath             = alertsPath + "/topics"
 	topicsPathAnchored     = alertsPath + "/topics/"
-	topicsBasePath         = httpd.BasePath + topicsPath
-	topicsBasePathAnchored = httpd.BasePath + topicsPathAnchored
+	topicsBasePath         = httpd.BasePreviewPath + topicsPath
+	topicsBasePathAnchored = httpd.BasePreviewPath + topicsPathAnchored
 
 	handlersPath             = alertsPath + "/handlers"
 	handlersPathAnchored     = alertsPath + "/handlers/"
-	handlersBasePath         = httpd.BasePath + handlersPath
-	handlersBasePathAnchored = httpd.BasePath + handlersPathAnchored
+	handlersBasePath         = httpd.BasePreviewPath + handlersPath
+	handlersBasePathAnchored = httpd.BasePreviewPath + handlersPathAnchored
 
 	topicEventsPath   = "events"
 	topicHandlersPath = "handlers"
@@ -76,7 +76,7 @@ type Service struct {
 
 	routes       []httpd.Route
 	HTTPDService interface {
-		AddRoutes([]httpd.Route) error
+		AddPreviewRoutes([]httpd.Route) error
 		DelRoutes([]httpd.Route)
 	}
 	StorageService interface {
@@ -214,7 +214,7 @@ func (s *Service) Open() error {
 		},
 	}
 
-	return s.HTTPDService.AddRoutes(s.routes)
+	return s.HTTPDService.AddPreviewRoutes(s.routes)
 }
 
 func (s *Service) loadSavedHandlerSpecs() error {
