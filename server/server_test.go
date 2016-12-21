@@ -7540,30 +7540,39 @@ stream
 	s.Restart()
 
 	l := cli.TopicEventsLink("test")
-	if te, err := cli.TopicEvents(l); err != nil {
-		t.Fatal(err)
-	} else {
-		expTE := client.TopicEvents{
-			Link:  l,
-			Topic: "test",
-			Events: []client.Event{{
-				Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test/events/id"},
-				ID:   "id",
-				State: client.EventState{
-					Message:  "message",
-					Details:  "details",
-					Time:     time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
-					Duration: 0,
-					Level:    "CRITICAL",
-				},
-			}},
-		}
+	expTopicEvents := client.TopicEvents{
+		Link:  l,
+		Topic: "test",
+		Events: []client.Event{{
+			Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test/events/id"},
+			ID:   "id",
+			State: client.EventState{
+				Message:  "message",
+				Details:  "details",
+				Time:     time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+				Duration: 0,
+				Level:    "CRITICAL",
+			},
+		}},
+	}
 
-		if !reflect.DeepEqual(te, expTE) {
-			t.Errorf("unexpected topic events:\ngot\n%+v\nexp\n%+v\n", te, expTE)
-		}
+	te, err := cli.ListTopicEvents(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(te, expTopicEvents) {
+		t.Errorf("unexpected topic events:\ngot\n%+v\nexp\n%+v\n", te, expTopicEvents)
+	}
+
+	event, err := cli.Event(expTopicEvents.Events[0].Link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(event, expTopicEvents.Events[0]) {
+		t.Errorf("unexpected topic event:\ngot\n%+v\nexp\n%+v\n", event, expTopicEvents.Events[0])
 	}
 }
+
 func TestServer_AlertListHandlers(t *testing.T) {
 	// Setup test TCP server
 	ts, err := alerttest.NewTCPServer()
@@ -7681,6 +7690,18 @@ func TestServer_AlertListHandlers(t *testing.T) {
 	exp.Handlers = expHandlers.Handlers[0:1]
 	if !reflect.DeepEqual(handlers, exp) {
 		t.Errorf("unexpected handlers with pattern \"test\":\ngot\n%+v\nexp\n%+v\n", handlers, exp)
+	}
+
+	// List handlers of test topic
+	l := cli.TopicHandlersLink("test")
+	topicHandlers, err := cli.ListTopicHandlers(l)
+	expTopicHandlers := client.TopicHandlers{
+		Link:     client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test/handlers"},
+		Topic:    "test",
+		Handlers: expHandlers.Handlers,
+	}
+	if !reflect.DeepEqual(topicHandlers, expTopicHandlers) {
+		t.Errorf("unexpected topic handlers:\ngot\n%+v\nexp\n%+v\n", topicHandlers, expTopicHandlers)
 	}
 }
 

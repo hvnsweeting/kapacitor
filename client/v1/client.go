@@ -26,25 +26,26 @@ const DefaultUserAgent = "KapacitorClient"
 // then use the appropriate *Link methods.
 
 const (
-	basePath         = "/kapacitor/v1"
-	pingPath         = basePath + "/ping"
-	logLevelPath     = basePath + "/loglevel"
-	debugVarsPath    = basePath + "/debug/vars"
-	tasksPath        = basePath + "/tasks"
-	templatesPath    = basePath + "/templates"
-	recordingsPath   = basePath + "/recordings"
-	recordStreamPath = basePath + "/recordings/stream"
-	recordBatchPath  = basePath + "/recordings/batch"
-	recordQueryPath  = basePath + "/recordings/query"
-	replaysPath      = basePath + "/replays"
-	replayBatchPath  = basePath + "/replays/batch"
-	replayQueryPath  = basePath + "/replays/query"
-	configPath       = basePath + "/config"
-	serviceTestsPath = basePath + "/service-tests"
-	alertsPath       = basePath + "/alerts"
-	handlersPath     = alertsPath + "/handlers"
-	topicsPath       = alertsPath + "/topics"
-	topicEventsPath  = "events"
+	basePath          = "/kapacitor/v1"
+	pingPath          = basePath + "/ping"
+	logLevelPath      = basePath + "/loglevel"
+	debugVarsPath     = basePath + "/debug/vars"
+	tasksPath         = basePath + "/tasks"
+	templatesPath     = basePath + "/templates"
+	recordingsPath    = basePath + "/recordings"
+	recordStreamPath  = basePath + "/recordings/stream"
+	recordBatchPath   = basePath + "/recordings/batch"
+	recordQueryPath   = basePath + "/recordings/query"
+	replaysPath       = basePath + "/replays"
+	replayBatchPath   = basePath + "/replays/batch"
+	replayQueryPath   = basePath + "/replays/query"
+	configPath        = basePath + "/config"
+	serviceTestsPath  = basePath + "/service-tests"
+	alertsPath        = basePath + "/alerts"
+	handlersPath      = alertsPath + "/handlers"
+	topicsPath        = alertsPath + "/topics"
+	topicEventsPath   = "events"
+	topicHandlersPath = "handlers"
 )
 
 // HTTP configuration for connecting to Kapacitor
@@ -687,6 +688,10 @@ func (c *Client) ServiceTestLink(service string) Link {
 
 func (c *Client) TopicEventsLink(topic string) Link {
 	return Link{Relation: Self, Href: path.Join(topicsPath, topic, topicEventsPath)}
+}
+
+func (c *Client) TopicHandlersLink(topic string) Link {
+	return Link{Relation: Self, Href: path.Join(topicsPath, topic, topicHandlersPath)}
 }
 
 type CreateTaskOptions struct {
@@ -1798,8 +1803,28 @@ type EventState struct {
 	Level    string        `json:"level"`
 }
 
+// Event retrieves an alert handler.
+// Errors if no handler exists.
+func (c *Client) Event(link Link) (Event, error) {
+	e := Event{}
+	if link.Href == "" {
+		return e, fmt.Errorf("invalid link %v", link)
+	}
+
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return e, err
+	}
+
+	_, err = c.Do(req, &e, http.StatusOK)
+	return e, err
+}
+
 // TopicEvents returns the current state for events within a topic.
-func (c *Client) TopicEvents(link Link) (TopicEvents, error) {
+func (c *Client) ListTopicEvents(link Link) (TopicEvents, error) {
 	t := TopicEvents{}
 	if link.Href == "" {
 		return t, fmt.Errorf("invalid link %v", link)
@@ -1821,6 +1846,25 @@ type TopicHandlers struct {
 	Link     Link      `json:"link"`
 	Topic    string    `json:"topic"`
 	Handlers []Handler `json:"handlers"`
+}
+
+// TopicHandlers returns the current state for events within a topic.
+func (c *Client) ListTopicHandlers(link Link) (TopicHandlers, error) {
+	t := TopicHandlers{}
+	if link.Href == "" {
+		return t, fmt.Errorf("invalid link %v", link)
+	}
+
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return t, err
+	}
+
+	_, err = c.Do(req, &t, http.StatusOK)
+	return t, err
 }
 
 type Handlers struct {
