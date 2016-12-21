@@ -7564,3 +7564,129 @@ stream
 		}
 	}
 }
+
+func TestServer_AlertHandler_MultipleActions(t *testing.T) {
+	resultJSON := `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`
+
+	// Create default config
+	c := NewConfig()
+
+	// Configure slack
+	slack := slacktest.NewServer()
+	c.Slack.Enabled = true
+	c.Slack.URL = slack.URL + "/test/slack/url"
+
+	// Configure victorops
+	vo := victoropstest.NewServer()
+	c.VictorOps.Enabled = true
+	c.VictorOps.URL = vo.URL
+	c.VictorOps.APIKey = "api_key"
+
+	s := OpenServer(c)
+	cli := Client(s)
+	closed := false
+	defer func() {
+		if !closed {
+			s.Close()
+		}
+	}()
+
+	if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+		ID:     "testAlertHandlers",
+		Topics: []string{"test"},
+		Actions: []client.HandlerAction{
+			{
+				Kind: "victorops",
+				Options: map[string]interface{}{
+					"routing-key": "key",
+				},
+			},
+			{
+				Kind: "slack",
+				Options: map[string]interface{}{
+					"channel": "#test",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tick := `
+stream
+	|from()
+		.measurement('alert')
+	|alert()
+		.topic('test')
+		.id('id')
+		.message('message')
+		.details('details')
+		.crit(lambda: TRUE)
+`
+
+	if _, err := cli.CreateTask(client.CreateTaskOptions{
+		ID:   "testAlertHandlers",
+		Type: client.StreamTask,
+		DBRPs: []client.DBRP{{
+			Database:        "mydb",
+			RetentionPolicy: "myrp",
+		}},
+		TICKscript: tick,
+		Status:     client.Enabled,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	point := "alert value=1 0000000000"
+	v := url.Values{}
+	v.Add("precision", "s")
+	s.MustWrite("mydb", "myrp", point, v)
+
+	// Close the entire server to ensure all data is processed
+	s.Close()
+	closed = true
+
+	// Validate slack
+	{
+		slack.Close()
+		got := slack.Requests()
+		exp := []slacktest.Request{{
+			URL: "/test/slack/url",
+			PostData: slacktest.PostData{
+				Channel:  "#test",
+				Username: "kapacitor",
+				Text:     "",
+				Attachments: []slacktest.Attachment{
+					{
+						Fallback:  "message",
+						Color:     "danger",
+						Text:      "message",
+						Mrkdwn_in: []string{"text"},
+					},
+				},
+			},
+		}}
+		if !reflect.DeepEqual(exp, got) {
+			t.Errorf("unexpected slack request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+		}
+	}
+	// Validate victorops
+	{
+		vo.Close()
+		got := vo.Requests()
+		exp := []victoropstest.Request{{
+			URL: "/api_key/key",
+			PostData: victoropstest.PostData{
+				MessageType:    "CRITICAL",
+				EntityID:       "id",
+				StateMessage:   "message",
+				Timestamp:      0,
+				MonitoringTool: "kapacitor",
+				Data:           resultJSON,
+			},
+		}}
+		if !reflect.DeepEqual(exp, got) {
+			t.Errorf("unexpected victorops request:\nexp\n%+v\ngot\n%+v\n", exp, got)
+		}
+	}
+}
