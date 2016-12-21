@@ -791,6 +791,12 @@ func (s *Service) TopicStatusEvents(pattern string, minLevel alert.Level) map[st
 	return s.topics.TopicStatusEvents(pattern, minLevel)
 }
 
+type sortedHandlers []client.Handler
+
+func (s sortedHandlers) Len() int               { return len(s) }
+func (s sortedHandlers) Less(i int, j int) bool { return s[i].ID < s[j].ID }
+func (s sortedHandlers) Swap(i int, j int)      { s[i], s[j] = s[j], s[i] }
+
 func (s *Service) Handlers(pattern string) []client.Handler {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -801,6 +807,7 @@ func (s *Service) Handlers(pattern string) []client.Handler {
 			handlers = append(handlers, s.convertHandlerSpec(h.Spec))
 		}
 	}
+	sort.Sort(sortedHandlers(handlers))
 	return handlers
 }
 func match(pattern, id string) bool {

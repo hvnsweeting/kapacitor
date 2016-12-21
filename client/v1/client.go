@@ -1965,6 +1965,41 @@ func (c *Client) DeleteHandler(link Link) error {
 	return err
 }
 
+type ListHandlersOptions struct {
+	Pattern string
+}
+
+func (o *ListHandlersOptions) Default() {}
+
+func (o *ListHandlersOptions) Values() *url.Values {
+	v := &url.Values{}
+	v.Set("pattern", o.Pattern)
+	return v
+}
+
+func (c *Client) ListHandlers(opt *ListHandlersOptions) (Handlers, error) {
+	handlers := Handlers{}
+	if opt == nil {
+		opt = new(ListHandlersOptions)
+	}
+	opt.Default()
+
+	u := *c.url
+	u.Path = handlersPath
+	u.RawQuery = opt.Values().Encode()
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return handlers, err
+	}
+
+	_, err = c.Do(req, &handlers, http.StatusOK)
+	if err != nil {
+		return handlers, err
+	}
+	return handlers, nil
+}
+
 type LogLevelOptions struct {
 	Level string `json:"level"`
 }

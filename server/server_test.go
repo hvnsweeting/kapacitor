@@ -7564,6 +7564,126 @@ stream
 		}
 	}
 }
+func TestServer_AlertListHandlers(t *testing.T) {
+	// Setup test TCP server
+	ts, err := alerttest.NewTCPServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Close()
+
+	// Create default config
+	c := NewConfig()
+	s := OpenServer(c)
+	cli := Client(s)
+	defer s.Close()
+
+	topics := []string{"test"}
+	actions := []client.HandlerAction{{
+		Kind:    "tcp",
+		Options: map[string]interface{}{"address": ts.Addr},
+	}}
+
+	// Number of handlers to create
+	n := 3
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("handler%d", i)
+		if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+			ID:      id,
+			Topics:  topics,
+			Actions: actions,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	expHandlers := client.Handlers{
+		Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers?pattern="},
+		Handlers: []client.Handler{
+			{
+				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/handler0"},
+				ID:      "handler0",
+				Topics:  topics,
+				Actions: actions,
+			},
+			{
+				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/handler1"},
+				ID:      "handler1",
+				Topics:  topics,
+				Actions: actions,
+			},
+			{
+				Link:    client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/handlers/handler2"},
+				ID:      "handler2",
+				Topics:  topics,
+				Actions: actions,
+			},
+		},
+	}
+
+	handlers, err := cli.ListHandlers(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(handlers, expHandlers) {
+		t.Errorf("unexpected handlers:\ngot\n%+v\nexp\n%+v\n", handlers, expHandlers)
+	}
+
+	// Restart the server
+	s.Restart()
+
+	// Check again
+	handlers, err = cli.ListHandlers(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(handlers, expHandlers) {
+		t.Errorf("unexpected handlers after restart:\ngot\n%+v\nexp\n%+v\n", handlers, expHandlers)
+	}
+
+	var exp client.Handlers
+
+	// Pattern = *
+	handlers, err = cli.ListHandlers(&client.ListHandlersOptions{
+		Pattern: "*",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp = expHandlers
+	exp.Link.Href = "/kapacitor/v1/alerts/handlers?pattern=%2A"
+	if !reflect.DeepEqual(handlers, exp) {
+		t.Errorf("unexpected handlers with pattern \"*\":\ngot\n%+v\nexp\n%+v\n", handlers, exp)
+	}
+
+	// Pattern = handler*
+	handlers, err = cli.ListHandlers(&client.ListHandlersOptions{
+		Pattern: "handler*",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp = expHandlers
+	exp.Link.Href = "/kapacitor/v1/alerts/handlers?pattern=handler%2A"
+	if !reflect.DeepEqual(handlers, exp) {
+		t.Errorf("unexpected handlers with pattern \"test\":\ngot\n%+v\nexp\n%+v\n", handlers, exp)
+	}
+
+	// Pattern = handler0
+	handlers, err = cli.ListHandlers(&client.ListHandlersOptions{
+		Pattern: "handler0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp = expHandlers
+	exp.Link.Href = "/kapacitor/v1/alerts/handlers?pattern=handler0"
+	exp.Handlers = expHandlers.Handlers[0:1]
+	if !reflect.DeepEqual(handlers, exp) {
+		t.Errorf("unexpected handlers with pattern \"test\":\ngot\n%+v\nexp\n%+v\n", handlers, exp)
+	}
+}
+
 func TestServer_AlertListTopics(t *testing.T) {
 	// Setup test TCP server
 	ts, err := alerttest.NewTCPServer()
