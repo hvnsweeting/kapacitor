@@ -1724,6 +1724,24 @@ func (c *Client) DoServiceTest(link Link, sto ServiceTestOptions) (ServiceTestRe
 	return r, nil
 }
 
+type ListTopicsOptions struct {
+	Pattern  string
+	MinLevel string
+}
+
+func (o *ListTopicsOptions) Default() {
+	if o.MinLevel == "" {
+		o.MinLevel = "OK"
+	}
+}
+
+func (o *ListTopicsOptions) Values() *url.Values {
+	v := &url.Values{}
+	v.Set("pattern", o.Pattern)
+	v.Set("min-level", o.MinLevel)
+	return v
+}
+
 type Topics struct {
 	Link   Link    `json:"link"`
 	Topics []Topic `json:"topics"`
@@ -1735,6 +1753,29 @@ type Topic struct {
 	Level        string `json:"level"`
 	EventsLink   Link   `json:"events-link"`
 	HandlersLink Link   `json:"handlers-link"`
+}
+
+func (c *Client) ListTopics(opt *ListTopicsOptions) (Topics, error) {
+	topics := Topics{}
+	if opt == nil {
+		opt = new(ListTopicsOptions)
+	}
+	opt.Default()
+
+	u := *c.url
+	u.Path = topicsPath
+	u.RawQuery = opt.Values().Encode()
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return topics, err
+	}
+
+	_, err = c.Do(req, &topics, http.StatusOK)
+	if err != nil {
+		return topics, err
+	}
+	return topics, nil
 }
 
 type TopicEvents struct {

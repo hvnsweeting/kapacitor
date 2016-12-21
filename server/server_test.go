@@ -7564,6 +7564,153 @@ stream
 		}
 	}
 }
+func TestServer_AlertListTopics(t *testing.T) {
+	// Setup test TCP server
+	ts, err := alerttest.NewTCPServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Close()
+
+	// Create default config
+	c := NewConfig()
+	s := OpenServer(c)
+	cli := Client(s)
+	defer s.Close()
+
+	if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+		ID:     "testAlertHandler",
+		Topics: []string{"test", "system", "misc"},
+		Actions: []client.HandlerAction{{
+			Kind:    "tcp",
+			Options: map[string]interface{}{"address": ts.Addr},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	expTopics := client.Topics{
+		Link: client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics?min-level=OK&pattern="},
+		Topics: []client.Topic{
+			{
+				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/misc"},
+				ID:           "misc",
+				Level:        "OK",
+				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1/alerts/topics/misc/events"},
+				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1/alerts/topics/misc/handlers"},
+			},
+			{
+				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/system"},
+				ID:           "system",
+				Level:        "OK",
+				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1/alerts/topics/system/events"},
+				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1/alerts/topics/system/handlers"},
+			},
+			{
+				Link:         client.Link{Relation: client.Self, Href: "/kapacitor/v1/alerts/topics/test"},
+				ID:           "test",
+				Level:        "OK",
+				EventsLink:   client.Link{Relation: "events", Href: "/kapacitor/v1/alerts/topics/test/events"},
+				HandlersLink: client.Link{Relation: "handlers", Href: "/kapacitor/v1/alerts/topics/test/handlers"},
+			},
+		},
+	}
+	topics, err := cli.ListTopics(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(topics, expTopics) {
+		t.Errorf("unexpected topics:\ngot\n%+v\nexp\n%+v\n", topics, expTopics)
+	}
+
+	tick := `
+stream
+	|from()
+		.measurement('alert')
+	|alert()
+		.topic('test')
+		.id('id')
+		.message('message')
+		.details('details')
+		.crit(lambda: TRUE)
+`
+
+	if _, err := cli.CreateTask(client.CreateTaskOptions{
+		ID:   "testAlertHandlers",
+		Type: client.StreamTask,
+		DBRPs: []client.DBRP{{
+			Database:        "mydb",
+			RetentionPolicy: "myrp",
+		}},
+		TICKscript: tick,
+		Status:     client.Enabled,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	point := "alert value=1 0000000000"
+	v := url.Values{}
+	v.Add("precision", "s")
+	s.MustWrite("mydb", "myrp", point, v)
+
+	// Restart the server
+	s.Restart()
+
+	// Update expected topics since we triggered an event.
+	expTopics.Topics[2].Level = "CRITICAL"
+
+	// Check again
+	topics, err = cli.ListTopics(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(topics, expTopics) {
+		t.Errorf("unexpected topics after restart:\ngot\n%+v\nexp\n%+v\n", topics, expTopics)
+	}
+
+	var exp client.Topics
+
+	// Pattern = *
+	topics, err = cli.ListTopics(&client.ListTopicsOptions{
+		Pattern: "*",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp = expTopics
+	exp.Link.Href = "/kapacitor/v1/alerts/topics?min-level=OK&pattern=%2A"
+	if !reflect.DeepEqual(topics, exp) {
+		t.Errorf("unexpected topics with pattern \"*\":\ngot\n%+v\nexp\n%+v\n", topics, exp)
+	}
+
+	// Pattern = test
+	topics, err = cli.ListTopics(&client.ListTopicsOptions{
+		Pattern: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp = expTopics
+	exp.Link.Href = "/kapacitor/v1/alerts/topics?min-level=OK&pattern=test"
+	exp.Topics = expTopics.Topics[2:]
+	if !reflect.DeepEqual(topics, exp) {
+		t.Errorf("unexpected topics with pattern \"test\":\ngot\n%+v\nexp\n%+v\n", topics, exp)
+	}
+
+	// MinLevel = INFO
+	topics, err = cli.ListTopics(&client.ListTopicsOptions{
+		MinLevel: "INFO",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp = expTopics
+	exp.Link.Href = "/kapacitor/v1/alerts/topics?min-level=INFO&pattern="
+	exp.Topics = expTopics.Topics[2:]
+	if !reflect.DeepEqual(topics, exp) {
+		t.Errorf("unexpected topics min level \"info\":\ngot\n%+v\nexp\n%+v\n", topics, exp)
+	}
+}
 
 func TestServer_AlertHandler_MultipleActions(t *testing.T) {
 	resultJSON := `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`

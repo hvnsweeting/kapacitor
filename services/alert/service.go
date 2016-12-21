@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 
@@ -766,6 +767,12 @@ func (s *Service) ReplaceHandlerSpec(oldSpec, newSpec HandlerSpec) error {
 	return nil
 }
 
+type sortedTopics []client.Topic
+
+func (s sortedTopics) Len() int               { return len(s) }
+func (s sortedTopics) Less(i int, j int) bool { return s[i].ID < s[j].ID }
+func (s sortedTopics) Swap(i int, j int)      { s[i], s[j] = s[j], s[i] }
+
 // TopicStatus returns the max alert level for each topic matching 'pattern', not returning
 // any topics with max alert levels less severe than 'minLevel'
 func (s *Service) TopicStatus(pattern string, minLevel alert.Level) []client.Topic {
@@ -774,6 +781,7 @@ func (s *Service) TopicStatus(pattern string, minLevel alert.Level) []client.Top
 	for topic, level := range statuses {
 		topics = append(topics, s.createClientTopic(topic, level))
 	}
+	sort.Sort(sortedTopics(topics))
 	return topics
 }
 

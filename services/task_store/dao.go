@@ -188,6 +188,7 @@ func newTaskKV(store storage.Interface) (*taskKV, error) {
 	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
 		return new(Task)
 	})
+	c.Prefix = "tasks"
 	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err

@@ -87,6 +87,7 @@ func newHandlerSpecKV(store storage.Interface) (*handlerSpecKV, error) {
 	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
 		return new(HandlerSpec)
 	})
+	c.Prefix = "handlers"
 	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err
@@ -206,6 +207,7 @@ func newTopicStateKV(store storage.Interface) (*topicStateKV, error) {
 	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
 		return new(TopicState)
 	})
+	c.Prefix = "topics"
 	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err

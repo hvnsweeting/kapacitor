@@ -47,6 +47,7 @@ type IndexedStore struct {
 }
 
 type IndexedStoreConfig struct {
+	Prefix        string
 	DataPrefix    string
 	IndexesPrefix string
 	NewObject     NewObjectF
@@ -72,11 +73,20 @@ func validPath(p string) bool {
 }
 
 func (c IndexedStoreConfig) Validate() error {
+	if c.Prefix == "" {
+		return errors.New("must provide a prefix")
+	}
+	if !validPath(c.Prefix) {
+		return fmt.Errorf("invalid prefix %q", c.Prefix)
+	}
 	if !validPath(c.DataPrefix) {
 		return fmt.Errorf("invalid data prefix %q", c.DataPrefix)
 	}
 	if !validPath(c.IndexesPrefix) {
 		return fmt.Errorf("invalid indexes prefix %q", c.IndexesPrefix)
+	}
+	if c.IndexesPrefix == c.DataPrefix {
+		return fmt.Errorf("data prefix and indexes prefix must be different, both are %q", c.IndexesPrefix)
 	}
 	if c.NewObject == nil {
 		return errors.New("must provide a NewObject function")
@@ -98,8 +108,8 @@ func NewIndexedStore(store Interface, c IndexedStoreConfig) (*IndexedStore, erro
 	}
 	return &IndexedStore{
 		store:         store,
-		dataPrefix:    c.DataPrefix,
-		indexesPrefix: c.IndexesPrefix,
+		dataPrefix:    path.Join("/", c.Prefix, c.DataPrefix),
+		indexesPrefix: path.Join("/", c.Prefix, c.IndexesPrefix),
 		indexes:       c.Indexes,
 		newObject:     c.NewObject,
 	}, nil
