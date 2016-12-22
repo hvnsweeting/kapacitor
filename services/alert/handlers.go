@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/kapacitor/alert"
 	"github.com/influxdata/kapacitor/bufpool"
 	"github.com/influxdata/kapacitor/command"
 )
@@ -24,11 +25,11 @@ type AlertData struct {
 	Details  string          `json:"details"`
 	Time     time.Time       `json:"time"`
 	Duration time.Duration   `json:"duration"`
-	Level    Level           `json:"level"`
+	Level    alert.Level     `json:"level"`
 	Data     influxql.Result `json:"data"`
 }
 
-func alertDataFromEvent(event Event) AlertData {
+func alertDataFromEvent(event alert.Event) AlertData {
 	return AlertData{
 		ID:       event.State.ID,
 		Message:  event.State.Message,
@@ -70,7 +71,7 @@ func DefaultLogHandlerConfig() LogHandlerConfig {
 	}
 }
 
-func NewLogHandler(c LogHandlerConfig, l *log.Logger) (Handler, error) {
+func NewLogHandler(c LogHandlerConfig, l *log.Logger) (alert.Handler, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -81,7 +82,7 @@ func NewLogHandler(c LogHandlerConfig, l *log.Logger) (Handler, error) {
 	}, nil
 }
 
-func (h *logHandler) Handle(event Event) {
+func (h *logHandler) Handle(event alert.Event) {
 	ad := alertDataFromEvent(event)
 
 	f, err := os.OpenFile(h.logpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, h.mode)
@@ -110,7 +111,7 @@ type execHandler struct {
 	logger    *log.Logger
 }
 
-func NewExecHandler(c ExecHandlerConfig, l *log.Logger) Handler {
+func NewExecHandler(c ExecHandlerConfig, l *log.Logger) alert.Handler {
 	s := command.Spec{
 		Prog: c.Prog,
 		Args: c.Args,
@@ -123,7 +124,7 @@ func NewExecHandler(c ExecHandlerConfig, l *log.Logger) Handler {
 	}
 }
 
-func (h *execHandler) Handle(event Event) {
+func (h *execHandler) Handle(event alert.Event) {
 	buf := h.bp.Get()
 	defer h.bp.Put(buf)
 	ad := alertDataFromEvent(event)
@@ -161,7 +162,7 @@ type tcpHandler struct {
 	logger *log.Logger
 }
 
-func NewTCPHandler(c TCPHandlerConfig, l *log.Logger) Handler {
+func NewTCPHandler(c TCPHandlerConfig, l *log.Logger) alert.Handler {
 	return &tcpHandler{
 		bp:     bufpool.New(),
 		addr:   c.Address,
@@ -169,7 +170,7 @@ func NewTCPHandler(c TCPHandlerConfig, l *log.Logger) Handler {
 	}
 }
 
-func (h *tcpHandler) Handle(event Event) {
+func (h *tcpHandler) Handle(event alert.Event) {
 	buf := h.bp.Get()
 	defer h.bp.Put(buf)
 	ad := alertDataFromEvent(event)
@@ -201,7 +202,7 @@ type postHandler struct {
 	logger *log.Logger
 }
 
-func NewPostHandler(c PostHandlerConfig, l *log.Logger) Handler {
+func NewPostHandler(c PostHandlerConfig, l *log.Logger) alert.Handler {
 	return &postHandler{
 		bp:     bufpool.New(),
 		url:    c.URL,
@@ -209,7 +210,7 @@ func NewPostHandler(c PostHandlerConfig, l *log.Logger) Handler {
 	}
 }
 
-func (h *postHandler) Handle(event Event) {
+func (h *postHandler) Handle(event alert.Event) {
 	body := h.bp.Get()
 	defer h.bp.Put(body)
 	ad := alertDataFromEvent(event)

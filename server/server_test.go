@@ -26,11 +26,12 @@ import (
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/toml"
 	"github.com/influxdata/kapacitor/alert"
-	"github.com/influxdata/kapacitor/alert/alerttest"
 	"github.com/influxdata/kapacitor/client/v1"
 	"github.com/influxdata/kapacitor/command"
 	"github.com/influxdata/kapacitor/command/commandtest"
 	"github.com/influxdata/kapacitor/server"
+	alertservice "github.com/influxdata/kapacitor/services/alert"
+	"github.com/influxdata/kapacitor/services/alert/alerttest"
 	"github.com/influxdata/kapacitor/services/alerta/alertatest"
 	"github.com/influxdata/kapacitor/services/hipchat/hipchattest"
 	"github.com/influxdata/kapacitor/services/opsgenie"
@@ -6860,7 +6861,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 
 	resultJSON := `{"Series":[{"name":"alert","columns":["time","value"],"values":[["1970-01-01T00:00:00Z",1]]}],"Messages":null,"Err":null}`
 
-	alertData := alert.AlertData{
+	alertData := alertservice.AlertData{
 		ID:      "id",
 		Message: "message",
 		Details: "details",
@@ -7025,7 +7026,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 				tdir := ctxt.Value("tdir").(string)
 				defer os.RemoveAll(tdir)
 				l := ctxt.Value("log").(*alerttest.Log)
-				expData := []alert.AlertData{alertData}
+				expData := []alertservice.AlertData{alertData}
 				expMode := os.FileMode(0604)
 
 				m, err := l.Mode()
@@ -7141,7 +7142,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*alerttest.PostServer)
 				ts.Close()
-				exp := []alert.AlertData{alertData}
+				exp := []alertservice.AlertData{alertData}
 				got := ts.Data()
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected post request:\nexp\n%+v\ngot\n%+v\n", exp, got)
@@ -7324,7 +7325,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 			result: func(ctxt context.Context) error {
 				ts := ctxt.Value("server").(*alerttest.TCPServer)
 				ts.Close()
-				exp := []alert.AlertData{alertData}
+				exp := []alertservice.AlertData{alertData}
 				got := ts.Data()
 				if !reflect.DeepEqual(exp, got) {
 					return fmt.Errorf("unexpected tcp request:\nexp\n%+v\ngot\n%+v\n", exp, got)

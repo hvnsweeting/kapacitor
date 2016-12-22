@@ -875,14 +875,14 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha handle
 		}
 		ha = newPassThroughHandler(h)
 	case "exec":
-		c := alert.ExecHandlerConfig{
+		c := ExecHandlerConfig{
 			Commander: s.Commander,
 		}
 		err = decodeOptions(spec.Options, &c)
 		if err != nil {
 			return
 		}
-		h := alert.NewExecHandler(c, s.logger)
+		h := NewExecHandler(c, s.logger)
 		ha = newPassThroughHandler(h)
 	case "hipchat":
 		c := hipchat.HandlerConfig{}
@@ -893,12 +893,12 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha handle
 		h := s.HipChatService.Handler(c, s.logger)
 		ha = newPassThroughHandler(h)
 	case "log":
-		c := alert.DefaultLogHandlerConfig()
+		c := DefaultLogHandlerConfig()
 		err = decodeOptions(spec.Options, &c)
 		if err != nil {
 			return
 		}
-		h, err := alert.NewLogHandler(c, s.logger)
+		h, err := NewLogHandler(c, s.logger)
 		if err != nil {
 			return nil, err
 		}
@@ -920,12 +920,12 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha handle
 		h := s.PagerDutyService.Handler(c, s.logger)
 		ha = newPassThroughHandler(h)
 	case "post":
-		c := alert.PostHandlerConfig{}
+		c := PostHandlerConfig{}
 		err = decodeOptions(spec.Options, &c)
 		if err != nil {
 			return
 		}
-		h := alert.NewPostHandler(c, s.logger)
+		h := NewPostHandler(c, s.logger)
 		ha = newPassThroughHandler(h)
 	case "sensu":
 		h := s.SensuService.Handler(s.logger)
@@ -950,12 +950,12 @@ func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha handle
 		h := s.TalkService.Handler(s.logger)
 		ha = newPassThroughHandler(h)
 	case "tcp":
-		c := alert.TCPHandlerConfig{}
+		c := TCPHandlerConfig{}
 		err = decodeOptions(spec.Options, &c)
 		if err != nil {
 			return
 		}
-		h := alert.NewTCPHandler(c, s.logger)
+		h := NewTCPHandler(c, s.logger)
 		ha = newPassThroughHandler(h)
 	case "telegram":
 		c := telegram.HandlerConfig{}

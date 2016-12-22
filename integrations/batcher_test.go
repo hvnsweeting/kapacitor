@@ -1356,7 +1356,7 @@ batch
 func TestBatch_AlertStateChangesOnly(t *testing.T) {
 	requestCount := int32(0)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ad := alert.AlertData{}
+		ad := alertservice.AlertData{}
 		dec := json.NewDecoder(r.Body)
 		err := dec.Decode(&ad)
 		if err != nil {
@@ -1364,7 +1364,7 @@ func TestBatch_AlertStateChangesOnly(t *testing.T) {
 		}
 		atomic.AddInt32(&requestCount, 1)
 		if rc := atomic.LoadInt32(&requestCount); rc == 1 {
-			expAd := alert.AlertData{
+			expAd := alertservice.AlertData{
 				ID:      "cpu_usage_idle:cpu=cpu-total",
 				Message: "cpu_usage_idle:cpu=cpu-total is CRITICAL",
 				Time:    time.Date(1971, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -1375,7 +1375,7 @@ func TestBatch_AlertStateChangesOnly(t *testing.T) {
 				t.Error(msg)
 			}
 		} else {
-			expAd := alert.AlertData{
+			expAd := alertservice.AlertData{
 				ID:       "cpu_usage_idle:cpu=cpu-total",
 				Message:  "cpu_usage_idle:cpu=cpu-total is OK",
 				Time:     time.Date(1971, 1, 1, 0, 0, 38, 0, time.UTC),
@@ -1421,7 +1421,7 @@ batch
 func TestBatch_AlertStateChangesOnlyExpired(t *testing.T) {
 	requestCount := int32(0)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ad := alert.AlertData{}
+		ad := alertservice.AlertData{}
 		dec := json.NewDecoder(r.Body)
 		err := dec.Decode(&ad)
 		if err != nil {
@@ -1429,11 +1429,11 @@ func TestBatch_AlertStateChangesOnlyExpired(t *testing.T) {
 		}
 		// We don't care about the data for this test
 		ad.Data = influxql.Result{}
-		var expAd alert.AlertData
+		var expAd alertservice.AlertData
 		atomic.AddInt32(&requestCount, 1)
 		rc := atomic.LoadInt32(&requestCount)
 		if rc < 3 {
-			expAd = alert.AlertData{
+			expAd = alertservice.AlertData{
 				ID:       "cpu_usage_idle:cpu=cpu-total",
 				Message:  "cpu_usage_idle:cpu=cpu-total is CRITICAL",
 				Time:     time.Date(1971, 1, 1, 0, 0, int(rc-1)*20, 0, time.UTC),
@@ -1441,7 +1441,7 @@ func TestBatch_AlertStateChangesOnlyExpired(t *testing.T) {
 				Level:    alert.Critical,
 			}
 		} else {
-			expAd = alert.AlertData{
+			expAd = alertservice.AlertData{
 				ID:       "cpu_usage_idle:cpu=cpu-total",
 				Message:  "cpu_usage_idle:cpu=cpu-total is OK",
 				Time:     time.Date(1971, 1, 1, 0, 0, 38, 0, time.UTC),

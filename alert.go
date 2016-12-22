@@ -17,6 +17,7 @@ import (
 	"github.com/influxdata/kapacitor/expvar"
 	"github.com/influxdata/kapacitor/models"
 	"github.com/influxdata/kapacitor/pipeline"
+	alertservice "github.com/influxdata/kapacitor/services/alert"
 	"github.com/influxdata/kapacitor/services/hipchat"
 	"github.com/influxdata/kapacitor/services/opsgenie"
 	"github.com/influxdata/kapacitor/services/pagerduty"
@@ -119,18 +120,18 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 
 	// Construct alert handlers
 	for _, post := range n.PostHandlers {
-		c := alert.PostHandlerConfig{
+		c := alertservice.PostHandlerConfig{
 			URL: post.URL,
 		}
-		h := alert.NewPostHandler(c, l)
+		h := alertservice.NewPostHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 
 	for _, tcp := range n.TcpHandlers {
-		c := alert.TCPHandlerConfig{
+		c := alertservice.TCPHandlerConfig{
 			Address: tcp.Address,
 		}
-		h := alert.NewTCPHandler(c, l)
+		h := alertservice.NewTCPHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 
@@ -154,22 +155,22 @@ func newAlertNode(et *ExecutingTask, n *pipeline.AlertNode, l *log.Logger) (an *
 	}
 
 	for _, e := range n.ExecHandlers {
-		c := alert.ExecHandlerConfig{
+		c := alertservice.ExecHandlerConfig{
 			Prog:      e.Command[0],
 			Args:      e.Command[1:],
 			Commander: et.tm.Commander,
 		}
-		h := alert.NewExecHandler(c, l)
+		h := alertservice.NewExecHandler(c, l)
 		an.handlers = append(an.handlers, h)
 	}
 
 	for _, log := range n.LogHandlers {
-		c := alert.DefaultLogHandlerConfig()
+		c := alertservice.DefaultLogHandlerConfig()
 		c.Path = log.FilePath
 		if log.Mode != 0 {
 			c.Mode = os.FileMode(log.Mode)
 		}
-		h, err := alert.NewLogHandler(c, l)
+		h, err := alertservice.NewLogHandler(c, l)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create log alert handler")
 		}
