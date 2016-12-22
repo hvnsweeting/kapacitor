@@ -29,7 +29,10 @@ type WriteOperator interface {
 // ReadOnlyTx provides an interface for performing read operations in a single transaction.
 type ReadOnlyTx interface {
 	ReadOperator
+
 	// Rollback signals that the transaction is complete.
+	// If the transaction was not committed, then all changes are reverted.
+	// Rollback must always be called for every transaction.
 	Rollback() error
 }
 
@@ -39,14 +42,11 @@ type Tx interface {
 	WriteOperator
 
 	// Commit finalizes the transaction.
+	// Once a transaction is committed, rolling back the transaction has no effect.
 	Commit() error
 }
 
-// Common interface for interacting with a simple Key/Value storage
-type Interface interface {
-	ReadOperator
-	WriteOperator
-
+type TxOperator interface {
 	// BeginReadOnlyTx starts a new read only transaction. The transaction must be rolledback.
 	// Leaving a transaction open can block other operations and otherwise
 	// significantly degrade the performance of the storage backend.
@@ -59,9 +59,20 @@ type Interface interface {
 	BeginTx() (Tx, error)
 }
 
+// Common interface for interacting with a simple Key/Value storage
+type Interface interface {
+
+	// View creates a new read only transaction and always rolls it back.
+	View(func(ReadOnlyTx) error) error
+
+	// Update creates a new read-write transaction and always rolls it back.
+	// If the function returns a nil error the transaction is committed, otherwise the error is returned.
+	Update(func(Tx) error) error
+}
+
 // View manages a read only transaction.
-func View(s Interface, f func(ReadOnlyTx) error) error {
-	tx, err := s.BeginReadOnlyTx()
+func DoView(o TxOperator, f func(ReadOnlyTx) error) error {
+	tx, err := o.BeginReadOnlyTx()
 	if err != nil {
 		return err
 	}
@@ -69,9 +80,9 @@ func View(s Interface, f func(ReadOnlyTx) error) error {
 	return f(tx)
 }
 
-// Update manages a read/write transaction.
-func Update(s Interface, f func(Tx) error) error {
-	tx, err := s.BeginTx()
+// DoUpdate provides a complete implementation of Interface.Update for a TxOperator.
+func DoUpdate(o TxOperator, f func(Tx) error) error {
+	tx, err := o.BeginTx()
 	if err != nil {
 		return err
 	}
@@ -89,7 +100,7 @@ type KeyValue struct {
 }
 
 // Return a list of values from a list of KeyValues using an offset/limit bound and a match function.
-func DoListFunc(list []*KeyValue, match func(value []byte) bool, offset, limit int) [][]byte {
+func DoListFunc(list []*KeyValue, match func(value []byte) bool, offset, limit int) []string {
 	l := len(list)
 	upper := offset + limit
 	if upper > l {
@@ -100,7 +111,7 @@ func DoListFunc(list []*KeyValue, match func(value []byte) bool, offset, limit i
 		// No more results
 		return nil
 	}
-	matches := make([][]byte, 0, size)
+	matches := make([]string, 0, size)
 	i := 0
 	for _, kv := range list {
 		if !match(kv.Value) {
@@ -114,7 +125,7 @@ func DoListFunc(list []*KeyValue, match func(value []byte) bool, offset, limit i
 			continue
 		}
 
-		matches = append(matches, kv.Value)
+		matches = append(matches, string(kv.Value))
 
 		// Stop once limit reached
 		if len(matches) == size {

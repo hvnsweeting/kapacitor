@@ -494,6 +494,7 @@ func (s *Service) handleListTopicHandlers(t *alert.Topic, w http.ResponseWriter,
 			handlers = append(handlers, s.convertHandlerSpec(h.Spec))
 		}
 	}
+	sort.Sort(sortedHandlers(handlers))
 	th := client.TopicHandlers{
 		Link:     s.topicHandlersLink(t.ID(), client.Self),
 		Topic:    t.ID(),

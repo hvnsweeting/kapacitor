@@ -19,6 +19,14 @@ func NewBolt(db *bolt.DB, bucket string) *Bolt {
 	}
 }
 
+func (b *Bolt) View(f func(tx ReadOnlyTx) error) error {
+	return DoView(b, f)
+}
+
+func (b *Bolt) Update(f func(tx Tx) error) error {
+	return DoUpdate(b, f)
+}
+
 func (b *Bolt) put(tx *bolt.Tx, key string, value []byte) error {
 	bucket, err := tx.CreateBucketIfNotExists(b.bucket)
 	if err != nil {

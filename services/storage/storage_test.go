@@ -13,6 +13,9 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Error used to specifically trigger a rollback for tests.
+var rollbackErr = errors.New("rollback")
+
 type createStoreCloser func() (storeCloser, error)
 
 // stores is a map of all storage implementations,
@@ -86,46 +89,49 @@ func TestStorage_CRUD(t *testing.T) {
 			defer db.Close()
 
 			s := db.Store("crud")
-			key := "key0"
-			value := []byte("test value")
-			if exists, err := s.Exists(key); err != nil {
-				t.Fatal(err)
-			} else if exists {
-				t.Fatal("expected key to not exist")
-			}
+			s.Update(func(tx storage.Tx) error {
+				key := "key0"
+				value := []byte("test value")
+				if exists, err := tx.Exists(key); err != nil {
+					t.Fatal(err)
+				} else if exists {
+					t.Fatal("expected key to not exist")
+				}
 
-			if err := s.Put(key, value); err != nil {
-				t.Fatal(err)
-			}
-			if exists, err := s.Exists(key); err != nil {
-				t.Fatal(err)
-			} else if !exists {
-				t.Fatal("expected key to exist")
-			}
+				if err := tx.Put(key, value); err != nil {
+					t.Fatal(err)
+				}
+				if exists, err := tx.Exists(key); err != nil {
+					t.Fatal(err)
+				} else if !exists {
+					t.Fatal("expected key to exist")
+				}
 
-			got, err := s.Get(key)
-			if err != nil {
-				t.Fatal(err)
-			}
+				got, err := tx.Get(key)
+				if err != nil {
+					t.Fatal(err)
+				}
 
-			if !bytes.Equal(got.Value, value) {
-				t.Fatalf("unexpected value got %q exp %q", string(got.Value), string(value))
-			}
+				if !bytes.Equal(got.Value, value) {
+					t.Fatalf("unexpected value got %q exp %q", string(got.Value), string(value))
+				}
 
-			if err := s.Delete(key); err != nil {
-				t.Fatal(err)
-			}
+				if err := tx.Delete(key); err != nil {
+					t.Fatal(err)
+				}
 
-			if exists, err := s.Exists(key); err != nil {
-				t.Fatal(err)
-			} else if exists {
-				t.Fatal("expected key to not exist after delete")
-			}
+				if exists, err := tx.Exists(key); err != nil {
+					t.Fatal(err)
+				} else if exists {
+					t.Fatal("expected key to not exist after delete")
+				}
+				return nil
+			})
 		})
 	}
 }
 
-func TestStorage_Tx_Commit(t *testing.T) {
+func TestStorage_Update(t *testing.T) {
 	for name, sc := range stores {
 		t.Run(name, func(t *testing.T) {
 			db, err := sc()
@@ -136,18 +142,18 @@ func TestStorage_Tx_Commit(t *testing.T) {
 
 			s := db.Store("commit")
 			value := []byte("test value")
-			tx, err := s.BeginTx()
+			err = s.Update(func(tx storage.Tx) error {
+				return tx.Put("key0", value)
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := tx.Put("key0", value); err != nil {
-				t.Fatal(err)
-			}
-			if err := tx.Commit(); err != nil {
-				t.Fatal(err)
-			}
 
-			got, err := s.Get("key0")
+			var got *storage.KeyValue
+			err = s.View(func(tx storage.ReadOnlyTx) error {
+				got, err = tx.Get("key0")
+				return err
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,7 +165,7 @@ func TestStorage_Tx_Commit(t *testing.T) {
 	}
 }
 
-func TestStorage_Tx_Rollback(t *testing.T) {
+func TestStorage_Update_Rollback(t *testing.T) {
 	for name, sc := range stores {
 		t.Run(name, func(t *testing.T) {
 			db, err := sc()
@@ -172,22 +178,31 @@ func TestStorage_Tx_Rollback(t *testing.T) {
 			value := []byte("test value")
 
 			// Put value
-			if err := s.Put("key0", value); err != nil {
-				t.Fatal(err)
-			}
-
-			tx, err := s.BeginTx()
+			err = s.Update(func(tx storage.Tx) error {
+				return tx.Put("key0", value)
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := tx.Put("key0", []byte("overridden value is rolledback")); err != nil {
-				t.Fatal(err)
-			}
-			if err := tx.Rollback(); err != nil {
-				t.Fatal(err)
+
+			err = s.Update(func(tx storage.Tx) error {
+				if err := tx.Put("key0", []byte("overridden value is rolledback")); err != nil {
+					return err
+				}
+				return rollbackErr
+			})
+
+			if err == nil {
+				t.Fatal("expected error")
+			} else if err != rollbackErr {
+				t.Fatalf("unexpected error: got %v exp %v", err, rollbackErr)
 			}
 
-			got, err := s.Get("key0")
+			var got *storage.KeyValue
+			s.View(func(tx storage.ReadOnlyTx) error {
+				got, err = tx.Get("key0")
+				return err
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,7 +214,7 @@ func TestStorage_Tx_Rollback(t *testing.T) {
 	}
 }
 
-func TestStorage_Tx_Concurrent_Buckets(t *testing.T) {
+func TestStorage_Update_Concurrent(t *testing.T) {
 	for name, sc := range stores {
 		t.Run(name, func(t *testing.T) {
 			db, err := sc()
@@ -220,28 +235,26 @@ func TestStorage_Tx_Concurrent_Buckets(t *testing.T) {
 
 			putLoop := func(s storage.Interface, w, i, k int) error {
 				// Begin new transaction
-				tx, err := s.BeginTx()
-				if err != nil {
-					return err
-				}
-				defer tx.Rollback()
-
-				// Put a set of values
-				for x := 0; x < k; x++ {
-					v := valueFmt(w, i, x)
-					k := keyFmt(w, i, x)
-					if err := tx.Put(k, v); err != nil {
-						return err
+				err := s.Update(func(tx storage.Tx) error {
+					// Put a set of values
+					for x := 0; x < k; x++ {
+						v := valueFmt(w, i, x)
+						k := keyFmt(w, i, x)
+						if err := tx.Put(k, v); err != nil {
+							return err
+						}
 					}
-				}
-
-				// Do not commit every third transaction
-				if i%3 != 0 {
-					if err := tx.Commit(); err != nil {
-						return err
+					// Do not commit every third transaction
+					if i%3 == 0 {
+						return rollbackErr
 					}
+					return nil
+				})
+				// Mask explicit rollback errors
+				if err == rollbackErr {
+					err = nil
 				}
-				return nil
+				return err
 			}
 
 			testF := func(s storage.Interface, w, i, k int) error {
@@ -282,7 +295,11 @@ func TestStorage_Tx_Concurrent_Buckets(t *testing.T) {
 					}
 					key := keyFmt(x, y, z)
 					value := valueFmt(x, y, z)
-					kv, err := s.Get(key)
+					var kv *storage.KeyValue
+					err := s.View(func(tx storage.ReadOnlyTx) error {
+						kv, err = tx.Get(key)
+						return err
+					})
 					if err != nil {
 						t.Fatalf("%s err:%v", key, err)
 					}

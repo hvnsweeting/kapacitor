@@ -51,112 +51,78 @@ type Override struct {
 	Create bool `json:"create"`
 }
 
-const (
-	overrideDataPrefix    = "/overrides/data/"
-	overrideIndexesPrefix = "/overrides/indexes/"
-
-	// Name of ID index
-	idIndex = "id/"
-)
-
-// Key/Value store based implementation of the OverrideDAO
-type overrideKV struct {
-	store storage.Interface
+func (o Override) ObjectID() string {
+	return o.ID
 }
 
-func newOverrideKV(store storage.Interface) *overrideKV {
-	return &overrideKV{
-		store: store,
-	}
-}
-
-func encodeOverride(o Override) ([]byte, error) {
+func (o Override) MarshalBinary() ([]byte, error) {
 	return storage.VersionJSONEncode(version, o)
 }
 
-func decodeOverride(data []byte) (o Override, err error) {
-	err = storage.VersionJSONDecode(data, func(version int, dec *json.Decoder) error {
+func (o *Override) UnmarshalBinary(data []byte) error {
+	return storage.VersionJSONDecode(data, func(version int, dec *json.Decoder) error {
 		dec.UseNumber()
-		return dec.Decode(&o)
+		return dec.Decode(o)
 	})
-	return o, err
 }
 
-// Create a key for the override data
-func (d *overrideKV) overrideDataKey(id string) string {
-	return overrideDataPrefix + id
+// Key/Value store based implementation of the OverrideDAO
+type overrideKV struct {
+	store *storage.IndexedStore
 }
 
-// Create a key for a given index and value.
-//
-// Indexes are maintained via a 'directory' like system:
-//
-// /overrides/data/ID -- contains encoded override data
-// /overrides/index/id/ID -- contains the override ID
-//
-// As such to list all overrides in ID sorted order use the /overrides/index/id/ directory.
-func (d *overrideKV) overrideIndexKey(index, value string) string {
-	return overrideIndexesPrefix + index + value
-}
-
-func (d *overrideKV) Get(id string) (Override, error) {
-	key := d.overrideDataKey(id)
-	if exists, err := d.store.Exists(key); err != nil {
-		return Override{}, err
-	} else if !exists {
-		return Override{}, ErrNoOverrideExists
-	}
-	kv, err := d.store.Get(key)
-	if err != nil {
-		return Override{}, err
-	}
-	return decodeOverride(kv.Value)
-}
-
-func (d *overrideKV) Set(o Override) error {
-	key := d.overrideDataKey(o.ID)
-
-	data, err := encodeOverride(o)
-	if err != nil {
-		return err
-	}
-	// Put data
-	err = d.store.Put(key, data)
-	if err != nil {
-		return err
-	}
-	// Put ID index
-	indexKey := d.overrideIndexKey(idIndex, o.ID)
-	return d.store.Put(indexKey, []byte(o.ID))
-}
-
-func (d *overrideKV) Delete(id string) error {
-	key := d.overrideDataKey(id)
-	indexKey := d.overrideIndexKey(idIndex, id)
-
-	dataErr := d.store.Delete(key)
-	indexErr := d.store.Delete(indexKey)
-	if dataErr != nil {
-		return dataErr
-	}
-	return indexErr
-}
-
-func (d *overrideKV) List(prefix string) ([]Override, error) {
-	// List all override ids sorted by ID
-	ids, err := d.store.List(overrideIndexesPrefix + idIndex + prefix)
+func newOverrideKV(store storage.Interface) (*overrideKV, error) {
+	c := storage.DefaultIndexedStoreConfig("overrides", func() storage.BinaryObject {
+		return new(Override)
+	})
+	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err
 	}
-	overrides := make([]Override, 0, len(ids))
-	for _, kv := range ids {
-		id := string(kv.Value)
-		o, err := d.Get(id)
-		if err != nil {
-			return nil, err
-		}
-		overrides = append(overrides, o)
-	}
+	return &overrideKV{
+		store: istore,
+	}, nil
+}
 
+func (kv *overrideKV) error(err error) error {
+	if err == storage.ErrNoObjectExists {
+		return ErrNoOverrideExists
+	}
+	return err
+}
+
+func (kv *overrideKV) Get(id string) (Override, error) {
+	obj, err := kv.store.Get(id)
+	if err != nil {
+		return Override{}, kv.error(err)
+	}
+	o, ok := obj.(*Override)
+	if !ok {
+		return Override{}, storage.ImpossibleTypeErr(o, obj)
+	}
+	return *o, nil
+}
+
+func (kv *overrideKV) Set(o Override) error {
+	return kv.store.Put(&o)
+}
+
+func (kv *overrideKV) Delete(id string) error {
+	return kv.store.Delete(id)
+}
+
+func (kv *overrideKV) List(prefix string) ([]Override, error) {
+	objects, err := kv.store.List(storage.DefaultIDIndex, "", 0, -1)
+	if err != nil {
+		return nil, err
+	}
+	overrides := make([]Override, len(objects))
+	for i, object := range objects {
+		o, ok := object.(*Override)
+		if !ok {
+			return nil, storage.ImpossibleTypeErr(o, object)
+		}
+		overrides[i] = *o
+	}
 	return overrides, nil
 }

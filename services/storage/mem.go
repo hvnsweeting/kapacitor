@@ -21,6 +21,14 @@ func NewMemStore(name string) *MemStore {
 	}
 }
 
+func (s *MemStore) View(f func(tx ReadOnlyTx) error) error {
+	return DoView(s, f)
+}
+
+func (s *MemStore) Update(f func(tx Tx) error) error {
+	return DoUpdate(s, f)
+}
+
 func (s *MemStore) Put(key string, value []byte) error {
 	s.mu.Lock()
 	s.store[key] = value

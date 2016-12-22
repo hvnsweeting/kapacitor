@@ -3,7 +3,6 @@ package alert
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/influxdata/kapacitor/alert"
@@ -84,10 +83,9 @@ type handlerSpecKV struct {
 }
 
 func newHandlerSpecKV(store storage.Interface) (*handlerSpecKV, error) {
-	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
+	c := storage.DefaultIndexedStoreConfig("handlers", func() storage.BinaryObject {
 		return new(HandlerSpec)
 	})
-	c.Prefix = "handlers"
 	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err
@@ -113,7 +111,7 @@ func (kv *handlerSpecKV) Get(id string) (HandlerSpec, error) {
 	}
 	h, ok := o.(*HandlerSpec)
 	if !ok {
-		return HandlerSpec{}, fmt.Errorf("impossible error, object not a HandlerSpec, got %T", o)
+		return HandlerSpec{}, storage.ImpossibleTypeErr(h, o)
 	}
 	return *h, nil
 }
@@ -139,7 +137,7 @@ func (kv *handlerSpecKV) List(pattern string, offset, limit int) ([]HandlerSpec,
 	for i, o := range objects {
 		h, ok := o.(*HandlerSpec)
 		if !ok {
-			return nil, fmt.Errorf("impossible error, object not a HandlerSpec, got %T", o)
+			return nil, storage.ImpossibleTypeErr(h, o)
 		}
 		specs[i] = *h
 	}
@@ -204,10 +202,9 @@ type topicStateKV struct {
 }
 
 func newTopicStateKV(store storage.Interface) (*topicStateKV, error) {
-	c := storage.DefaultIndexedStoreConfig(func() storage.BinaryObject {
+	c := storage.DefaultIndexedStoreConfig("topics", func() storage.BinaryObject {
 		return new(TopicState)
 	})
-	c.Prefix = "topics"
 	istore, err := storage.NewIndexedStore(store, c)
 	if err != nil {
 		return nil, err
@@ -231,7 +228,7 @@ func (kv *topicStateKV) Get(id string) (TopicState, error) {
 	}
 	t, ok := o.(*TopicState)
 	if !ok {
-		return TopicState{}, fmt.Errorf("impossible error, object not a TopicState, got %T", o)
+		return TopicState{}, storage.ImpossibleTypeErr(t, o)
 	}
 	return *t, nil
 }
@@ -257,7 +254,7 @@ func (kv *topicStateKV) List(pattern string, offset, limit int) ([]TopicState, e
 	for i, o := range objects {
 		t, ok := o.(*TopicState)
 		if !ok {
-			return nil, fmt.Errorf("impossible error, object not a TopicState, got %T", o)
+			return nil, storage.ImpossibleTypeErr(t, o)
 		}
 		specs[i] = *t
 	}

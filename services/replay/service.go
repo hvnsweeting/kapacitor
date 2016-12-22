@@ -101,16 +101,22 @@ const replayNamespace = "replay_store"
 
 func (s *Service) Open() error {
 	// Create DAO
-	s.recordings = newRecordingKV(s.StorageService.Store(recordingNamespace))
-	s.replays = newReplayKV(s.StorageService.Store(replayNamespace))
-
-	err := os.MkdirAll(s.saveDir, 0755)
+	recordings, err := newRecordingKV(s.StorageService.Store(recordingNamespace))
 	if err != nil {
 		return err
 	}
-
-	err = s.syncRecordingMetadata()
+	s.recordings = recordings
+	replays, err := newReplayKV(s.StorageService.Store(replayNamespace))
 	if err != nil {
+		return err
+	}
+	s.replays = replays
+
+	if err := os.MkdirAll(s.saveDir, 0755); err != nil {
+		return err
+	}
+
+	if err := s.syncRecordingMetadata(); err != nil {
 		return err
 	}
 
