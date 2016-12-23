@@ -695,6 +695,10 @@ func (c *Client) TopicHandlersLink(topic string) Link {
 	return Link{Relation: Self, Href: path.Join(topicsPath, topic, topicHandlersPath)}
 }
 
+func (c *Client) HandlerLink(id string) Link {
+	return Link{Relation: Self, Href: path.Join(handlersPath, id)}
+}
+
 type CreateTaskOptions struct {
 	ID         string     `json:"id,omitempty"`
 	TemplateID string     `json:"template-id,omitempty"`
@@ -1784,6 +1788,22 @@ func (c *Client) ListTopics(opt *ListTopicsOptions) (Topics, error) {
 	return topics, nil
 }
 
+func (c *Client) DeleteTopic(link Link) error {
+	if link.Href == "" {
+		return fmt.Errorf("invalid link %v", link)
+	}
+	u := *c.url
+	u.Path = link.Href
+
+	req, err := http.NewRequest("DELETE", u.String(), nil)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.Do(req, nil, http.StatusNoContent)
+	return err
+}
+
 type TopicEvents struct {
 	Link   Link    `json:"link"`
 	Topic  string  `json:"topic"`
@@ -1905,15 +1925,15 @@ func (c *Client) Handler(link Link) (Handler, error) {
 	return h, err
 }
 
-type CreateHandlerOptions struct {
-	ID      string          `json:"id"`
-	Topics  []string        `json:"topics"`
-	Actions []HandlerAction `json:"actions"`
+type HandlerOptions struct {
+	ID      string          `json:"id" yaml:"id"`
+	Topics  []string        `json:"topics" yaml:"topics"`
+	Actions []HandlerAction `json:"actions" yaml:"actions"`
 }
 
 // CreateHandler creates a new alert handler.
 // Errors if the handler already exists.
-func (c *Client) CreateHandler(opt CreateHandlerOptions) (Handler, error) {
+func (c *Client) CreateHandler(opt HandlerOptions) (Handler, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	err := enc.Encode(opt)
@@ -1961,14 +1981,8 @@ func (c *Client) PatchHandler(link Link, patch JSONPatch) (Handler, error) {
 	return h, err
 }
 
-type ReplaceHandlerOptions struct {
-	ID      string          `json:"id"`
-	Topics  []string        `json:"topics"`
-	Actions []HandlerAction `json:"actions"`
-}
-
 // ReplaceHandler replaces an existing handler, with the new definition.
-func (c *Client) ReplaceHandler(link Link, opt ReplaceHandlerOptions) (Handler, error) {
+func (c *Client) ReplaceHandler(link Link, opt HandlerOptions) (Handler, error) {
 	h := Handler{}
 	if link.Href == "" {
 		return h, fmt.Errorf("invalid link %v", link)

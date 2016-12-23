@@ -6619,15 +6619,15 @@ func TestServer_DoServiceTest(t *testing.T) {
 
 func TestServer_AlertHandlers_CRUD(t *testing.T) {
 	testCases := []struct {
-		create    client.CreateHandlerOptions
+		create    client.HandlerOptions
 		expCreate client.Handler
 		patch     client.JSONPatch
 		expPatch  client.Handler
-		put       client.ReplaceHandlerOptions
+		put       client.HandlerOptions
 		expPut    client.Handler
 	}{
 		{
-			create: client.CreateHandlerOptions{
+			create: client.HandlerOptions{
 				ID:     "myhandler",
 				Topics: []string{"system", "test"},
 				Actions: []client.HandlerAction{{
@@ -6670,7 +6670,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 					},
 				}},
 			},
-			put: client.ReplaceHandlerOptions{
+			put: client.HandlerOptions{
 				ID:     "newid",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{{
@@ -6693,7 +6693,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 			},
 		},
 		{
-			create: client.CreateHandlerOptions{
+			create: client.HandlerOptions{
 				ID:     "anotherhandler",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{
@@ -6777,7 +6777,7 @@ func TestServer_AlertHandlers_CRUD(t *testing.T) {
 					},
 				},
 			},
-			put: client.ReplaceHandlerOptions{
+			put: client.HandlerOptions{
 				ID:     "anotherhandler",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{{
@@ -7431,7 +7431,7 @@ func TestServer_AlertHandlers(t *testing.T) {
 			}()
 			ctxt = context.WithValue(ctxt, "kapacitorURL", s.URL())
 
-			if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+			if _, err := cli.CreateHandler(client.HandlerOptions{
 				ID:     "testAlertHandlers",
 				Topics: []string{"test"},
 				Actions: []client.HandlerAction{
@@ -7496,7 +7496,7 @@ func TestServer_AlertTopic_PersistedState(t *testing.T) {
 	cli := Client(s)
 	defer s.Close()
 
-	if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+	if _, err := cli.CreateHandler(client.HandlerOptions{
 		ID:     "testAlertHandler",
 		Topics: []string{"test"},
 		Actions: []client.HandlerAction{{
@@ -7598,7 +7598,7 @@ func TestServer_AlertListHandlers(t *testing.T) {
 	n := 3
 	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("handler%d", i)
-		if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+		if _, err := cli.CreateHandler(client.HandlerOptions{
 			ID:      id,
 			Topics:  topics,
 			Actions: actions,
@@ -7720,7 +7720,7 @@ func TestServer_AlertListTopics(t *testing.T) {
 	cli := Client(s)
 	defer s.Close()
 
-	if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+	if _, err := cli.CreateHandler(client.HandlerOptions{
 		ID:     "testAlertHandler",
 		Topics: []string{"test", "system", "misc"},
 		Actions: []client.HandlerAction{{
@@ -7880,7 +7880,7 @@ func TestServer_AlertHandler_MultipleActions(t *testing.T) {
 		}
 	}()
 
-	if _, err := cli.CreateHandler(client.CreateHandlerOptions{
+	if _, err := cli.CreateHandler(client.HandlerOptions{
 		ID:     "testAlertHandlers",
 		Topics: []string{"test"},
 		Actions: []client.HandlerAction{
