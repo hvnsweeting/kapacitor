@@ -433,12 +433,9 @@ func (a *AlertNode) runAlert([]byte) error {
 			if state, ok := a.states[p.Group]; ok {
 				currentLevel = state.currentLevel()
 			} else {
-				// Check for pre-existing level on topics
-				if len(a.handlers) > 0 {
-					if state, ok := a.et.tm.AlertService.EventState(a.anonTopic, id); ok {
-						currentLevel = state.Level
-					}
-				}
+				// Check for pre-existing level on topic.
+				// Anon Topics do not preserve state as they are deleted when a task stops,
+				// so we only check the explict topic.
 				if a.topic != "" {
 					if state, ok := a.et.tm.AlertService.EventState(a.topic, id); ok {
 						currentLevel = state.Level

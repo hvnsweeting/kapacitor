@@ -526,6 +526,10 @@ func (s *Service) handleCreateHandler(w http.ResponseWriter, r *http.Request) {
 		httpd.HttpError(w, fmt.Sprint("invalid handler json: ", err.Error()), true, http.StatusBadRequest)
 		return
 	}
+	if err := handlerSpec.Validate(); err != nil {
+		httpd.HttpError(w, fmt.Sprint("invalid handler spec: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
 
 	err = s.RegisterHandlerSpec(handlerSpec)
 	if err != nil {
@@ -573,6 +577,10 @@ func (s *Service) handlePatchHandler(w http.ResponseWriter, r *http.Request) {
 		httpd.HttpError(w, fmt.Sprint("failed to unmarshal patched json: ", err.Error()), true, http.StatusInternalServerError)
 		return
 	}
+	if err := newSpec.Validate(); err != nil {
+		httpd.HttpError(w, fmt.Sprint("invalid handler spec: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
 
 	if err := s.ReplaceHandlerSpec(h.Spec, newSpec); err != nil {
 		httpd.HttpError(w, fmt.Sprint("failed to update handler: ", err.Error()), true, http.StatusInternalServerError)
@@ -599,6 +607,10 @@ func (s *Service) handlePutHandler(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&newSpec)
 	if err != nil {
 		httpd.HttpError(w, fmt.Sprint("failed to unmar JSON: ", err.Error()), true, http.StatusBadRequest)
+		return
+	}
+	if err := newSpec.Validate(); err != nil {
+		httpd.HttpError(w, fmt.Sprint("invalid handler spec: ", err.Error()), true, http.StatusBadRequest)
 		return
 	}
 
@@ -691,6 +703,9 @@ func (s *Service) loadHandlerSpec(spec HandlerSpec) error {
 }
 
 func (s *Service) RegisterHandlerSpec(spec HandlerSpec) error {
+	if err := spec.Validate(); err != nil {
+		return err
+	}
 	s.mu.RLock()
 	_, ok := s.handlers[spec.ID]
 	s.mu.RUnlock()
@@ -736,6 +751,9 @@ func (s *Service) DeregisterHandlerSpec(id string) error {
 }
 
 func (s *Service) ReplaceHandlerSpec(oldSpec, newSpec HandlerSpec) error {
+	if err := newSpec.Validate(); err != nil {
+		return err
+	}
 	newH, err := s.createHandlerFromSpec(newSpec)
 	if err != nil {
 		return err

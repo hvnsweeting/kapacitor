@@ -3,6 +3,8 @@ package alert
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/influxdata/kapacitor/alert"
@@ -55,6 +57,24 @@ type HandlerSpec struct {
 	ID      string              `json:"id"`
 	Topics  []string            `json:"topics"`
 	Actions []HandlerActionSpec `json:"actions"`
+}
+
+var validHandlerID = regexp.MustCompile(`^[-\._\p{L}0-9]+$`)
+var validTopicID = regexp.MustCompile(`^[-:\._\p{L}0-9]+$`)
+
+func (h HandlerSpec) Validate() error {
+	if !validHandlerID.MatchString(h.ID) {
+		return fmt.Errorf("handler ID must contain only letters, numbers, '-', '.' and '_'. %q", h.ID)
+	}
+	for _, t := range h.Topics {
+		if !validTopicID.MatchString(t) {
+			return fmt.Errorf("topic must contain only letters, numbers, '-', '.', ':' and '_'. %q", t)
+		}
+	}
+	if len(h.Actions) == 0 {
+		return errors.New("must provide at least one action")
+	}
+	return nil
 }
 
 // HandlerActionSpec defines an action an handler can take.

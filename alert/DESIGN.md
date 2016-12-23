@@ -25,7 +25,7 @@ See the API docs for more details.
 
 There are two ways to setup handlers for your alerts in Kapacitor.
 The first method is designed to be quick and easy to configure.
-The second method take a bit more setup but provides more control over the handlers.
+The second method takes a bit more setup but provides more control over the handlers.
 
 ### Direct Handlers
 
@@ -63,11 +63,10 @@ stream
         .every(1m)
     |mean('usage')
     |alert()
-        // Send this alert to the alert event subsystem (not currently implemented)
         .topic('cpu')
         .warn(lambda: "mean" > 70)
         .crit(lambda: "mean" > 80)
-        // Send this alert directly to slack. (works today)
+        // Send this alert directly to slack.
         .slack()
 ```
 
@@ -76,38 +75,41 @@ These alert handlers will be configured via the API.
 Use yaml/json to define the alert handlers.
 
 ```yaml
+id: my_handler
+
 topics:
     - cpu
     - mem
 
 actions:
-    - aggregate:
+    - kind: aggregate
+      options:
         groupBy: id
         interval: 1m
-    - throttle:
+    - kind: throttle
+      options:
         count: 10
         every: 5m
-    - publish:
+    - kind: publish
+      options:
         topics: [ throttled_aggreated ]
-    - pagerDuty:
+    - kind: pagerDuty
+      options:
          serviceKey: XXX
 ```
 
 ```json
 {
+    "id": "my_handler",
     "topics": ["cpu", "mem"],
-    "actions" : [
-        {"aggregate": {"groupBy":"id","internal":"1m"}},
-        {"throttle": {"count":10,"every":"5m"}},
-        {"publish": {"topics":["throttled_aggreated"]},
-        {"pagerDuty": {"serviceKey":"XXX"}}
+    "actions": [
+        {"kind":"aggregate", "options": {"groupBy":"id","internal":"1m"}},
+        {"kind":"throttle", "options": {"count":10,"every":"5m"}},
+        {"kind":"publish", "options": {"topics":["throttled_aggreated"]},
+        {"kind":"pagerDuty", "options": {"serviceKey":"XXX"}}
     ]
 }
 ```
 
 
-#### Implementation
-
-The underlying implementation will be a basic publish/subscribe system.
-Various subscriber can be defined via the above definitions which can in turn publish back to the internal system or send alerts to third parties.
 
