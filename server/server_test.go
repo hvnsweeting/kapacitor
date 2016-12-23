@@ -3027,7 +3027,6 @@ func TestServer_RecordReplayBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(tmpDir)
 	defer os.RemoveAll(tmpDir)
 	tick := `batch
     |query('SELECT value from mydb.myrp.cpu')
@@ -7571,6 +7570,15 @@ stream
 	}
 	if !reflect.DeepEqual(event, expTopicEvents.Events[0]) {
 		t.Errorf("unexpected topic event:\ngot\n%+v\nexp\n%+v\n", event, expTopicEvents.Events[0])
+	}
+
+	l = cli.TopicLink("test")
+	if err := cli.DeleteTopic(l); err != nil {
+		t.Fatal(err)
+	}
+	te, err = cli.ListTopicEvents(l)
+	if err == nil {
+		t.Fatal("expected error for deleted topic")
 	}
 }
 

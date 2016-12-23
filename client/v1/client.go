@@ -698,6 +698,9 @@ func (c *Client) TopicHandlersLink(topic string) Link {
 func (c *Client) HandlerLink(id string) Link {
 	return Link{Relation: Self, Href: path.Join(handlersPath, id)}
 }
+func (c *Client) TopicLink(id string) Link {
+	return Link{Relation: Self, Href: path.Join(topicsPath, id)}
+}
 
 type CreateTaskOptions struct {
 	ID         string     `json:"id,omitempty"`
