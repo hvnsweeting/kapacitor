@@ -58,7 +58,7 @@ Commands:
 	reload          Reload a running task with an updated task definition.
 	push            Publish a task definition to another Kapacitor instance. Not implemented yet.
 	delete          Delete tasks, templates, recordings, replays, topics or handlers.
-	list            List information about tasks, templates, recordings, replays, topics or handlers.
+	list            List information about tasks, templates, recordings, replays, topics, handlers or service-tests.
 	show            Display detailed information about a task.
 	show-template   Display detailed information about a template.
 	show-handler    Display detailed information about an alert handler.
@@ -1464,9 +1464,10 @@ func doShowHandler(args []string) error {
 func listUsage() {
 	var u = `Usage: kapacitor list (tasks|templates|recordings|replays|topics|handlers|service-tests) [ID or pattern]...
 
-List tasks, templates, recordings, replays, topics or handlers and their current state.
+	List tasks, templates, recordings, replays, topics or handlers and their current state.
 
-If no ID or pattern is given then all items will be listed.
+	If no ID or pattern is given then all items will be listed.
+
 `
 	fmt.Fprintln(os.Stderr, u)
 }
@@ -1749,6 +1750,7 @@ func deleteUsage() {
 	Delete a tasks, templates, recordings, replays, topics or handlers.
 
 	If a task is enabled it will be disabled and then deleted.
+
 
 For example:
 
