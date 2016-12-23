@@ -60,8 +60,9 @@ type handler struct {
 }
 
 type handlerAction interface {
-	Handle(event alert.Event)
+	alert.Handler
 	SetNext(h alert.Handler)
+	Close()
 }
 
 type Service struct {
@@ -743,6 +744,10 @@ func (s *Service) DeregisterHandlerSpec(id string) error {
 		}
 		s.topics.DeregisterHandler(h.Spec.Topics, h.Handler)
 
+		if ha, ok := h.Handler.(handlerAction); ok {
+			ha.Close()
+		}
+
 		s.mu.Lock()
 		delete(s.handlers, id)
 		s.mu.Unlock()
@@ -870,6 +875,7 @@ func decodeOptions(options map[string]interface{}, c interface{}) error {
 	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		ErrorUnused: true,
 		Result:      c,
+		DecodeHook:  mapstructure.StringToTimeDurationHookFunc(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to initialize mapstructure decoder")
@@ -882,6 +888,13 @@ func decodeOptions(options map[string]interface{}, c interface{}) error {
 
 func (s *Service) createHandlerActionFromSpec(spec HandlerActionSpec) (ha handlerAction, err error) {
 	switch spec.Kind {
+	case "aggregate":
+		c := AggregateHandlerConfig{}
+		err = decodeOptions(spec.Options, &c)
+		if err != nil {
+			return
+		}
+		ha = NewAggregateHandler(c, s.logger)
 	case "alerta":
 		c := s.AlertaService.DefaultHandlerConfig()
 		err = decodeOptions(spec.Options, &c)
@@ -1018,6 +1031,8 @@ func (h *passThroughHandler) Handle(event alert.Event) {
 
 func (h *passThroughHandler) SetNext(next alert.Handler) {
 	h.next = next
+}
+func (h *passThroughHandler) Close() {
 }
 
 // NoopHandler implements Handler and does nothing with the event

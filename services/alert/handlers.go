@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/influxdata/influxdb/influxql"
@@ -227,4 +229,91 @@ func (h *postHandler) Handle(event alert.Event) {
 		return
 	}
 	resp.Body.Close()
+}
+
+type AggregateHandlerConfig struct {
+	Interval time.Duration `mapstructure:"interval"`
+}
+
+type aggregateHandler struct {
+	interval time.Duration
+	next     alert.Handler
+
+	logger  *log.Logger
+	events  chan alert.Event
+	closing chan struct{}
+
+	wg sync.WaitGroup
+}
+
+func NewAggregateHandler(c AggregateHandlerConfig, l *log.Logger) handlerAction {
+	h := &aggregateHandler{
+		interval: time.Duration(c.Interval),
+		logger:   l,
+		events:   make(chan alert.Event),
+		closing:  make(chan struct{}),
+	}
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
+		h.run()
+	}()
+	return h
+}
+
+func (h *aggregateHandler) run() {
+	ticker := time.NewTicker(h.interval)
+	defer ticker.Stop()
+	var events []alert.Event
+	for {
+		select {
+		case <-h.closing:
+			return
+		case e := <-h.events:
+			events = append(events, e)
+		case <-ticker.C:
+			if len(events) == 0 {
+				continue
+			}
+			details := make([]string, len(events))
+			agg := alert.Event{
+				State: alert.EventState{
+					ID:      "aggregate",
+					Message: fmt.Sprintf("Received %d events in the last %v.", len(events), h.interval),
+				},
+			}
+			for i, e := range events {
+				agg.Topic = e.Topic
+				if e.State.Level > agg.State.Level {
+					agg.State.Level = e.State.Level
+				}
+				if e.State.Time.After(agg.State.Time) {
+					agg.State.Time = e.State.Time
+				}
+				if e.State.Duration > agg.State.Duration {
+					agg.State.Duration = e.State.Duration
+				}
+				details[i] = e.State.Message
+			}
+			agg.State.Details = strings.Join(details, "\n")
+			h.next.Handle(agg)
+			events = events[0:0]
+		}
+	}
+}
+
+func (h *aggregateHandler) Handle(event alert.Event) {
+	select {
+	case h.events <- event:
+	case <-h.closing:
+	}
+}
+
+func (h *aggregateHandler) SetNext(n alert.Handler) {
+	h.next = n
+}
+
+func (h *aggregateHandler) Close() {
+	close(h.closing)
+	h.wg.Wait()
 }
