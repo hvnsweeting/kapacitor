@@ -1904,8 +1904,8 @@ type Handler struct {
 }
 
 type HandlerAction struct {
-	Kind    string                 `json:"kind"`
-	Options map[string]interface{} `json:"options"`
+	Kind    string                 `json:"kind" yaml:"kind"`
+	Options map[string]interface{} `json:"options" yaml:"options"`
 }
 
 // Handler retrieves an alert handler.
