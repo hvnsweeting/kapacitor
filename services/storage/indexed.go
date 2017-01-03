@@ -4,7 +4,6 @@ import (
 	"encoding"
 	"errors"
 	"fmt"
-	"log"
 	"path"
 	"strings"
 )
@@ -206,6 +205,9 @@ func (s *IndexedStore) put(o BinaryObject, allowReplace, requireReplace bool) er
 			if err != nil {
 				return err
 			}
+			if !idx.Unique {
+				newValue = newValue + "/" + o.ObjectID()
+			}
 			newIndexKey := s.indexKey(idx.Name, newValue)
 
 			// Get old index key, if we are replacing
@@ -287,7 +289,6 @@ func (s *IndexedStore) ReverseList(index, pattern string, offset, limit int) ([]
 }
 
 func (s *IndexedStore) list(index, pattern string, offset, limit int, reverse bool) (objects []BinaryObject, err error) {
-	log.Println("D! list", index, pattern, offset, limit, reverse)
 	err = s.store.View(func(tx ReadOnlyTx) error {
 		// List all object ids sorted by index
 		ids, err := tx.List(s.indexKey(index, ""))
@@ -320,14 +321,11 @@ func (s *IndexedStore) list(index, pattern string, offset, limit int, reverse bo
 				matches[i] = string(ids[i].Value)
 			}
 		}
-		log.Println("D! matches", matches)
 
 		objects = make([]BinaryObject, len(matches))
 		for i, id := range matches {
-			log.Println("D! dataKey", s.dataKey(id))
 			data, err := tx.Get(s.dataKey(id))
 			if err != nil {
-				log.Println("D! ERROR", err, id)
 				return err
 			}
 			o := s.newObject()

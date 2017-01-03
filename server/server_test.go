@@ -2953,7 +2953,7 @@ test value=1 0000000012
 
 	recordings, err := cli.ListRecordings(nil)
 	if exp, got := 1, len(recordings); exp != got {
-		t.Fatalf("unexpected recordings list:\ngot %v\nexp %v", got, exp)
+		t.Fatalf("unexpected recordings list:\ngot %v\nexp %v\nrecordings %v", got, exp, recordings)
 	}
 
 	err = cli.DeleteRecording(recordings[0].Link)
@@ -2963,12 +2963,12 @@ test value=1 0000000012
 
 	recordings, err = cli.ListRecordings(nil)
 	if exp, got := 0, len(recordings); exp != got {
-		t.Errorf("unexpected recordings list:\ngot %v\nexp %v", got, exp)
+		t.Errorf("unexpected recordings list after delete:\ngot %v\nexp %v\nrecordings %v", got, exp, recordings)
 	}
 
 	replays, err := cli.ListReplays(nil)
 	if exp, got := 1, len(replays); exp != got {
-		t.Fatalf("unexpected replays list:\ngot %v\nexp %v", got, exp)
+		t.Fatalf("unexpected replays list:\ngot %v\nexp %v\nreplays %v", got, exp, replays)
 	}
 
 	err = cli.DeleteReplay(replays[0].Link)
@@ -2978,7 +2978,7 @@ test value=1 0000000012
 
 	replays, err = cli.ListReplays(nil)
 	if exp, got := 0, len(replays); exp != got {
-		t.Errorf("unexpected replays list:\ngot %v\nexp %v", got, exp)
+		t.Errorf("unexpected replays list after delete:\ngot %v\nexp %v\nreplays %v", got, exp, replays)
 	}
 }
 

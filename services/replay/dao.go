@@ -112,7 +112,7 @@ func newRecordingKV(store storage.Interface) (*recordingKV, error) {
 			if !ok {
 				return "", storage.ImpossibleTypeErr(r, o)
 			}
-			return r.Date.Format(time.RFC3339), nil
+			return r.Date.UTC().Format(time.RFC3339), nil
 		},
 	})
 	istore, err := storage.NewIndexedStore(store, c)
@@ -251,7 +251,7 @@ func newReplayKV(store storage.Interface) (*replayKV, error) {
 			if !ok {
 				return "", storage.ImpossibleTypeErr(r, o)
 			}
-			return r.Date.Format(time.RFC3339), nil
+			return r.Date.UTC().Format(time.RFC3339), nil
 		},
 	})
 	istore, err := storage.NewIndexedStore(store, c)
